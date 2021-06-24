@@ -1,6 +1,8 @@
 [package]
 name = "block-list"
 version = "1.0.0"
+description = "A simple tool for updating hosts block-list."
+licence = "GNU"
 authors = ["Oliver Brotchie <o.brotchie@gmail.com>"]
 edition = "2018"
 
