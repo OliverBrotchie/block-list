@@ -1,3 +1,6 @@
+<img src="https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fcdn4.iconfinder.com%2Fdata%2Ficons%2Fweb-design-and-development-2-11%2F66%2F80-512.png&f=1&nofb=1" alt="mosaic" title="Mosaic" width="200" height="200" />
+
+
 # Block List
 
 A simple hosts block-list updater built in Rust.
