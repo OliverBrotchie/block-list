@@ -1,6 +1,7 @@
 # Block List
 
-A simple hosts blocklist updater built in Rust.
+A simple hosts block-list updater built in Rust.
+
 This project uses the excellent and regularly updated [Unified Hosts](https://github.com/StevenBlack/hosts) lists from Steven Black.
 
 ### Installation
