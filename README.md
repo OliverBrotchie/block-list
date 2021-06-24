@@ -21,7 +21,7 @@ sudo block-list /path/to/hosts your-desired-list
 Basic example:
 
 ```shell
-# Blocks adds and social media (use hosts if you just want to block adds)
+# Blocks ads and social media (use hosts if you just want to block adds)
 sudo block-list /etc/hosts social
 ```
 
