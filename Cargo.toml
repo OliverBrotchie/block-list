@@ -2,7 +2,7 @@
 name = "block-list"
 version = "1.0.0"
 description = "A simple tool for updating hosts block-list."
-license = "GNU"
+license = "GPL-3.0"
 license-file = "LICENSE"
 repository = "https://github.com/OliverBrotchie/block-list"
 authors = ["Oliver Brotchie <o.brotchie@gmail.com>"]
