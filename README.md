@@ -3,7 +3,7 @@
 
 # Block List
 
-A simple host block-list updater built in Rust.
+A minimalist host-based block list tool built in Rust.
 
 This project uses the excellent and regularly updated [Unified Hosts](https://github.com/StevenBlack/hosts) lists from Steven Black.
 
