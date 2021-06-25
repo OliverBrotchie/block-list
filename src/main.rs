@@ -4,11 +4,10 @@ use std::io::BufReader;
 use std::io::prelude::*;
 use std::fs::OpenOptions;
 use std::fs::File;
-
+use curl::easy::{Easy2, Handler, WriteError};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args:Vec<String> = env::args().collect();
-    
     let mut hosts = String::new();
     let mut custom_hosts = String::new();
 
@@ -19,21 +18,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.len() == 3 {
         // Get the hosts file
-        hosts = reqwest::blocking::get(
+        struct Collector(Vec<u8>);
+        impl Handler for Collector {
+            fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
+                self.0.extend_from_slice(data);
+                Ok(data.len())
+            }
+        }
+
+        let mut curl = Easy2::new(Collector(Vec::new()));
+        curl.get(true).unwrap();
+        curl.url(&       
             if args[2] == "hosts" {
                 "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts".to_string()
             } else {
                 format!("https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/{}/hosts",args[2])
-            }
-        )?.text()?;
+            }[..]
+        ).unwrap();
+        curl.perform().unwrap();
 
-        // Test that the file is found
-        if hosts == "404: Not Found" {
-            println!("404: Not Found. See 'https://github.com/StevenBlack/hosts' for options. Usage: some-list")
+        if curl.response_code()? == 200 {
+            hosts = format!("{}",String::from_utf8_lossy(&curl.get_ref().0));
+            hosts.replace_range(..hosts.match_indices("# End of custom host records.").next().unwrap().0 + 29, "");
         } else {
-            hosts = hosts.chars()
-                .skip(hosts.match_indices("# End of custom host records.").next().unwrap().0 + 29)
-                .collect();
+            println!("Http error: {}. See 'https://github.com/StevenBlack/hosts' for options; usage: some-list", curl.response_code()?);
         }
     }
     
@@ -55,7 +63,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Replace file with new contents
     let mut file = File::create(&args[1])?;
     file.write_all(format!("{}# Block List\n{}\n{}",contents,custom_hosts,hosts).as_bytes())?;
-
     Ok(())
 }
-
