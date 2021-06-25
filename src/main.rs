@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get piped input
     if atty::isnt(atty::Stream::Stdin) {
-        custom_hosts = io::stdin().lock().lines().map(|e| e.expect("Error with standard input.")).collect()
+        custom_hosts = io::stdin().lock().lines().map(|e| format!("\n{}",e.expect("Error with standard input."))).collect()
     }
 
     if args.len() == 3 {
