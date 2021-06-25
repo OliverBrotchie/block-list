@@ -27,15 +27,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let mut curl = Easy2::new(Collector(Vec::new()));
-        curl.get(true).unwrap();
+        curl.get(true)?;
         curl.url(&       
             if args[2] == "hosts" {
                 "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts".to_string()
             } else {
                 format!("https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/{}/hosts",args[2])
             }[..]
-        ).unwrap();
-        curl.perform().unwrap();
+        )?;
+        curl.perform()?;
 
         if curl.response_code()? == 200 {
             hosts = format!("{}",String::from_utf8_lossy(&curl.get_ref().0));
