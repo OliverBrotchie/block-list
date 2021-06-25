@@ -24,7 +24,7 @@ sudo block-list /path/to/hosts your-desired-list
 Basic example:
 
 ```shell
-# Just use 'hosts' if you only want ad-blocking.
+# Just use 'hosts' as the desired list if you only want ad-blocking.
 sudo block-list /etc/hosts social
 ```
 
