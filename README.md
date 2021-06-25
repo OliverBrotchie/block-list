@@ -33,9 +33,3 @@ Pipe in a custom list:
 ```
 cat someFile.txt | sudo block-list /etc/hosts
 ```
-
-Or
-
-```
-cat someFile.txt | sudo block-list /etc/hosts social
-```
