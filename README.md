@@ -3,7 +3,7 @@
 
 # Block List
 
-A minimalist hosts-based tool for managing block lists.
+A minimalist hosts-based tool for managing block lists and ad-blocking.
 
 This project uses the excellent and regularly updated [Unified Hosts](https://github.com/StevenBlack/hosts) lists from Steven Black.
 
