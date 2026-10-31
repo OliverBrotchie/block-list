@@ -2,6 +2,7 @@ mod catalog;
 mod config;
 mod error;
 mod hosts;
+mod lists;
 mod pause;
 mod region;
 mod sources;
@@ -102,6 +103,20 @@ enum Cmd {
         #[arg(value_name = "SOURCE")]
         source: Option<String>,
     },
+    /// Show purpose lists, or toggle one.
+    Lists {
+        #[command(subcommand)]
+        action: Option<ListsAction>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ListsAction {
+    /// Toggle a list on or off.
+    Toggle {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
 }
 
 fn main() {
@@ -127,6 +142,7 @@ fn run(cli: &Cli) -> Result<()> {
         Some(Cmd::Add { sources }) => add_command(cli, &state, sources),
         Some(Cmd::Rm { sources }) => rm_command(cli, &state, sources),
         Some(Cmd::Catalog { source }) => catalog_command(source.as_deref()),
+        Some(Cmd::Lists { action }) => lists_command(cli, &state, action.as_ref()),
         None => bare(cli, &state),
     }
 }
@@ -230,12 +246,24 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
     };
     sources.extend(args.iter().chain(from.iter()).cloned());
     let sources = dedupe(sources);
-    let persist = !args.is_empty() || !from.is_empty();
-    apply(cli, state, &sources, persist)
+    let persist = if !args.is_empty() || !from.is_empty() {
+        Some(config::Config {
+            sources: sources.clone(),
+            lists: config.lists,
+        })
+    } else {
+        None
+    };
+    apply(cli, state, &sources, persist.as_ref())
 }
 
 /// Fetch or read every source, then replace the region in one write.
-fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<()> {
+fn apply(
+    cli: &Cli,
+    state: &Path,
+    sources: &[String],
+    persist: Option<&config::Config>,
+) -> Result<()> {
     if sources.is_empty() {
         return Err(Error::NoSourcesConfigured);
     }
@@ -304,13 +332,8 @@ fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<(
             region_hash: state::hash_region(&rendered),
         },
     )?;
-    if persist {
-        config::save(
-            state,
-            &config::Config {
-                sources: sources.to_vec(),
-            },
-        )?;
+    if let Some(persist) = persist {
+        config::save(state, persist)?;
     }
     pause::clear(state);
 
@@ -367,7 +390,49 @@ fn sources_command(cli: &Cli, state: &Path) -> Result<()> {
         chosen.push(extra.to_string());
     }
 
-    change_sources(cli, state, chosen, "sources selected")
+    change_sources(cli, state, chosen, config.lists, "sources selected")
+}
+
+fn lists_command(cli: &Cli, state: &Path, action: Option<&ListsAction>) -> Result<()> {
+    if !cli.dry_run {
+        restore_expired(state)?;
+    }
+    match action {
+        None => {
+            let config = config::load(state)?;
+            for view in lists::views(&config) {
+                let state = if view.enabled { "on" } else { "off" };
+                let kind = if view.custom { "custom" } else { "preset" };
+                let count = view.sources.len();
+                let unit = if count == 1 { "source" } else { "sources" };
+                println!("[{state}] {:<22} {kind:<7} {count} {unit}", view.name);
+            }
+            println!("toggle with `blk lists toggle <name>`; create and edit in `blk`");
+            Ok(())
+        }
+        Some(ListsAction::Toggle { name }) => {
+            let mut config = config::load(state)?;
+            let result = lists::toggle(&mut config, name)?;
+            let message = if result.enabled {
+                if result.kept_by.is_empty() {
+                    format!("{name} turned on")
+                } else {
+                    format!(
+                        "{name} stays on; sources kept for {}",
+                        result.kept_by.join(", ")
+                    )
+                }
+            } else if result.kept_by.is_empty() {
+                format!("{name} turned off")
+            } else {
+                format!(
+                    "{name} turned off; sources kept for {}",
+                    result.kept_by.join(", ")
+                )
+            };
+            change_sources(cli, state, config.sources, config.lists, &message)
+        }
+    }
 }
 
 fn add_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
@@ -377,7 +442,7 @@ fn add_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
     let config = config::load(state)?;
     let mut chosen = config.sources;
     chosen.extend(sources.iter().cloned());
-    change_sources(cli, state, chosen, "sources added")
+    change_sources(cli, state, chosen, config.lists, "sources added")
 }
 
 fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
@@ -394,12 +459,22 @@ fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
         .into_iter()
         .filter(|source| !sources.contains(source))
         .collect();
-    change_sources(cli, state, remaining, "sources removed")
+    change_sources(cli, state, remaining, config.lists, "sources removed")
 }
 
 /// Save a new source list, then apply it unless a live pause holds the region.
-fn change_sources(cli: &Cli, state: &Path, sources: Vec<String>, message: &str) -> Result<()> {
+fn change_sources(
+    cli: &Cli,
+    state: &Path,
+    sources: Vec<String>,
+    lists: Vec<config::List>,
+    message: &str,
+) -> Result<()> {
     let sources = dedupe(sources);
+    let next = config::Config {
+        sources: sources.clone(),
+        lists,
+    };
 
     if cli.dry_run {
         for source in &sources {
@@ -413,12 +488,7 @@ fn change_sources(cli: &Cli, state: &Path, sources: Vec<String>, message: &str) 
 
     if let Some(record) = pause::load(state)? {
         if !record.is_expired(pause::now()) {
-            config::save(
-                state,
-                &config::Config {
-                    sources: sources.clone(),
-                },
-            )?;
+            config::save(state, &next)?;
             if !cli.quiet {
                 println!("{message}; the pause is still in effect, run `blk resume`");
             }
@@ -429,14 +499,15 @@ fn change_sources(cli: &Cli, state: &Path, sources: Vec<String>, message: &str) 
 
     if sources.is_empty() {
         clear_region(cli, state)?;
-        config::save(state, &config::Config { sources })?;
+        config::save(state, &next)?;
         if !cli.quiet {
             println!("no sources configured; region removed");
+            println!("{message}");
         }
         return Ok(());
     }
 
-    apply(cli, state, &sources, true)?;
+    apply(cli, state, &sources, Some(&next))?;
     if !cli.quiet {
         println!("{message}");
     }

@@ -480,6 +480,99 @@ fn offline_url_source_reads_the_cache() {
 }
 
 #[test]
+fn lists_show_and_toggle_a_preset() {
+    let (dir, hosts) = setup("lists", "127.0.0.1 localhost\n");
+    let out = run(&dir, &["--hosts", hosts.to_str().unwrap(), "lists"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("Social media"), "stdout: {stdout}");
+    assert!(stdout.contains("[off]"), "stdout: {stdout}");
+
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "lists",
+            "toggle",
+            "Social media",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("turned on"));
+    let text = fs::read_to_string(&hosts).unwrap();
+    assert!(text.contains("# list: blk/social"));
+    assert!(text.contains("0.0.0.0 facebook.com"));
+    assert!(!text.to_lowercase().contains("whatsapp"));
+
+    let out = run(&dir, &["--hosts", hosts.to_str().unwrap(), "lists"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("[on] Social media"));
+
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "lists",
+            "toggle",
+            "Social media",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("turned off"));
+    assert!(!fs::read_to_string(&hosts).unwrap().contains("# BEGIN blk"));
+}
+
+#[test]
+fn lists_toggle_rejects_an_unknown_name() {
+    let (dir, hosts) = setup("lists-unknown", "127.0.0.1 localhost\n");
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "lists",
+            "toggle",
+            "nope",
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no list named nope"));
+}
+
+#[test]
+fn source_changes_preserve_custom_lists() {
+    let (dir, hosts) = setup("lists-preserve", "127.0.0.1 localhost\n");
+    fs::create_dir_all(dir.path().join("state")).unwrap();
+    fs::write(
+        dir.path().join("state").join("config.toml"),
+        "sources = []\n\n[[lists]]\nname = \"Focus\"\nsources = [\"oisd/small\"]\n",
+    )
+    .unwrap();
+
+    let out = run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "add", "blk/social"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let config = fs::read_to_string(dir.path().join("state").join("config.toml")).unwrap();
+    assert!(config.contains("Focus"), "config: {config}");
+    assert!(config.contains("blk/social"), "config: {config}");
+}
+
+#[test]
 fn offline_update_of_an_inline_source_writes_no_cache() {
     let (dir, hosts) = setup("inline", "127.0.0.1 localhost\n");
     let out = run(

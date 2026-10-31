@@ -16,6 +16,16 @@ pub enum Error {
     SourceNotConfigured { source: String },
     /// A source id is not in the catalog and is not a URL or an existing file.
     UnknownSource { source: String, known: Vec<String> },
+    /// A list name was not found.
+    ListNotFound { name: String },
+    /// A custom list already uses this name.
+    ListExists { name: String },
+    /// A preset name cannot be reused, edited, or deleted.
+    ListReserved { name: String },
+    /// A list needs at least one source.
+    ListEmpty,
+    /// A list needs a name.
+    EmptyListName,
     /// A pause is already running.
     AlreadyPaused(crate::pause::Pause),
     /// `pause` found no block region in the hosts file.
@@ -117,6 +127,13 @@ impl fmt::Display for Error {
                     known.join(", ")
                 )
             }
+            Error::ListNotFound { name } => write!(f, "no list named {name}"),
+            Error::ListExists { name } => write!(f, "a list named {name} already exists"),
+            Error::ListReserved { name } => {
+                write!(f, "{name} is a preset; preset names are reserved")
+            }
+            Error::ListEmpty => f.write_str("a list needs at least one source"),
+            Error::EmptyListName => f.write_str("a list needs a name"),
             Error::AlreadyPaused(record) => match record.until {
                 Some(until) => write!(
                     f,
@@ -312,6 +329,36 @@ mod tests {
         assert!(text.starts_with("already paused until "), "{text}");
         assert!(text.contains("left"), "{text}");
         assert!(!text.contains("(("), "{text}");
+    }
+
+    #[test]
+    fn list_errors_name_the_name() {
+        assert_eq!(
+            Error::ListNotFound {
+                name: "Focus".into()
+            }
+            .to_string(),
+            "no list named Focus"
+        );
+        assert_eq!(
+            Error::ListExists {
+                name: "Focus".into()
+            }
+            .to_string(),
+            "a list named Focus already exists"
+        );
+        assert_eq!(
+            Error::ListReserved {
+                name: "Social media".into()
+            }
+            .to_string(),
+            "Social media is a preset; preset names are reserved"
+        );
+        assert_eq!(
+            Error::ListEmpty.to_string(),
+            "a list needs at least one source"
+        );
+        assert_eq!(Error::EmptyListName.to_string(), "a list needs a name");
     }
 
     #[test]
