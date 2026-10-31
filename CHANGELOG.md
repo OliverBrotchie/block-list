@@ -4,7 +4,7 @@
 
 Breaking changes:
 
-- The binary is named `blk`. The package is still `block-list`.
+- The binary is named `blk`. The package is still `block-list`. `cargo install` leaves a 1.x `block-list` binary in place, so run `cargo uninstall block-list` before installing 2.0.
 - The hosts path defaults to `/etc/hosts`. The required path argument is gone; use `--hosts` to override.
 - The block region is marked with `# BEGIN blk` and `# END blk`, with one `# list:` section per source. Re-applying writes the same bytes.
 - A `# Block List` section from 1.x is left untouched. It is not migrated or removed.

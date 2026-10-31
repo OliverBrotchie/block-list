@@ -11,10 +11,10 @@ A hosts-based block list manager for macOS and Linux. `blk` keeps one managed re
 ## Install
 
 ```shell
-cargo install block-list
+cargo install block-list --locked
 ```
 
-The package is `block-list` and the binary is `blk`.
+The package is `block-list` and the binary is `blk`. `--locked` installs the versions in `Cargo.lock`; add `--force` to reinstall the same version.
 
 ## Quick start
 
@@ -166,6 +166,7 @@ Conditional requests mean the run is cheap when no list changed.
 
 ## Upgrading from 1.x
 
+- Uninstall the old package first: `cargo uninstall block-list`, then `cargo install block-list --locked`. Cargo does not remove a binary whose name changed. If `block-list` still sits next to `blk` in `~/.cargo/bin`, delete it; `blk doctor` warns when it finds it.
 - The binary is now `blk`, not `block-list`.
 - The hosts path is no longer a positional argument. It defaults to `/etc/hosts`; use `--hosts` to override.
 - Lists come from the catalog. Run `blk sources` or `blk add`.
