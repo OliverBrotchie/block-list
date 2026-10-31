@@ -219,12 +219,31 @@ fn clear_screen() {
 }
 
 /// Like `attempt`, for actions that report whether they changed anything.
-fn attempt_bool(outcome: Result<bool>) -> Result<bool> {
+/// Show a report or result, then wait so the screen is not cleared over it.
+fn show_output(outcome: Result<()>) -> Result<()> {
     match outcome {
-        Ok(value) => Ok(value),
+        Ok(()) => press_enter(),
+        Err(Error::Dialog(_)) => {}
+        Err(error) => {
+            eprintln!("{error}");
+            press_enter();
+        }
+    }
+    Ok(())
+}
+
+/// Like `show_output`, for actions that report whether they changed anything.
+fn show_bool(outcome: Result<bool>) -> Result<bool> {
+    match outcome {
+        Ok(true) => {
+            press_enter();
+            Ok(true)
+        }
+        Ok(false) => Ok(false),
         Err(Error::Dialog(_)) => Ok(false),
         Err(error) => {
             eprintln!("{error}");
+            press_enter();
             Ok(false)
         }
     }
@@ -237,6 +256,7 @@ fn attempt(outcome: Result<()>) -> Result<()> {
         Err(Error::Dialog(_)) => Ok(()),
         Err(error) => {
             eprintln!("{error}");
+            press_enter();
             Ok(())
         }
     }
@@ -324,14 +344,8 @@ fn blocking_menu(cli: &Cli, state: &Path) -> Result<()> {
             return Ok(());
         };
         match items[pick] {
-            "Show status" => {
-                attempt(status(cli, state, false))?;
-                press_enter();
-            }
-            "Update now" => {
-                attempt(update(cli, state, &[], &[]))?;
-                press_enter();
-            }
+            "Show status" => show_output(status(cli, state, false))?,
+            "Update now" => show_output(update(cli, state, &[], &[]))?,
             "Pause" => attempt(pause_menu(cli, state))?,
             "Turn off" => attempt(off(cli, state))?,
             "Resume" => attempt(resume(cli, state))?,
@@ -360,24 +374,15 @@ fn sources_menu(cli: &Cli, state: &Path) -> Result<()> {
         };
         match items[pick] {
             "Choose sources" => {
-                if attempt_bool(sources_command(cli, state))? {
-                    press_enter();
-                }
+                show_bool(sources_command(cli, state))?;
             }
             "Add a source" => {
-                if attempt_bool(add_source_menu(cli, state))? {
-                    press_enter();
-                }
+                show_bool(add_source_menu(cli, state))?;
             }
             "Remove a source" => {
-                if attempt_bool(remove_sources_menu(cli, state))? {
-                    press_enter();
-                }
+                show_bool(remove_sources_menu(cli, state))?;
             }
-            "Browse catalog" => {
-                attempt(catalog_command(None))?;
-                press_enter();
-            }
+            "Browse catalog" => show_output(catalog_command(None))?,
             _ => {}
         }
     }
@@ -434,14 +439,8 @@ fn tools_menu(cli: &Cli, state: &Path) -> Result<()> {
             return Ok(());
         };
         match pick {
-            0 => {
-                attempt(test_menu(cli, state))?;
-                press_enter();
-            }
-            1 => {
-                attempt(doctor(cli, state))?;
-                press_enter();
-            }
+            0 => show_output(test_menu(cli, state))?,
+            1 => show_output(doctor(cli, state))?,
             2 => attempt(config_command(state))?,
             _ => {}
         }
@@ -527,7 +526,7 @@ fn list_menu(
         0 => {
             let result = lists::toggle(config, &view.name)?;
             let message = toggle_message(&view.name, &result);
-            apply_lists(cli, state, config, &message)
+            show_output(apply_lists(cli, state, config, &message))
         }
         1 if view.custom => edit_list_menu(cli, state, config, view),
         2 if view.custom => delete_list_menu(cli, state, config, view),
@@ -1018,7 +1017,9 @@ fn change_sources(
         if !record.is_expired(pause::now()) {
             config::save(state, &next)?;
             if !cli.quiet {
-                println!("{message}; the pause is still in effect, run `blk resume`");
+                println!(
+                    "{message}; the pause is still in effect. Run `blk resume` and then `blk update` to apply."
+                );
             }
             return Ok(());
         }
@@ -1104,7 +1105,15 @@ fn status(cli: &Cli, state: &Path, json: bool) -> Result<()> {
         }
     }
 
+    let paused = record
+        .as_ref()
+        .is_some_and(|record| !record.is_expired(pause::now()));
     match hosts.parsed()? {
+        Some(parsed) if parsed.sections.is_empty() && paused => {
+            if !cli.quiet {
+                println!("{}: paused", cli.hosts.display());
+            }
+        }
         Some(parsed) => {
             let total: usize = parsed
                 .sections
@@ -1307,6 +1316,12 @@ fn doctor(cli: &Cli, state: &Path) -> Result<()> {
     let mut problems = 0;
     if !hosts::can_write() {
         println!("root: not running as root; writes would need sudo");
+    }
+    if let Some(path) = stale_legacy_binary() {
+        println!(
+            "warning: an old block-list binary is still installed at {}; delete it",
+            path.display()
+        );
     }
 
     let hosts = hosts::Hosts::read_lenient(&cli.hosts)?;
@@ -1653,8 +1668,37 @@ fn catalog_command(id: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn stale_binary(dir: &Path) -> Option<PathBuf> {
+    let legacy = dir.join("block-list");
+    legacy.is_file().then_some(legacy)
+}
+
+fn stale_legacy_binary() -> Option<PathBuf> {
+    stale_binary(std::env::current_exe().ok()?.parent()?)
+}
+
 fn state_dir() -> PathBuf {
     std::env::var_os("BLK_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/etc/blk"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_a_legacy_binary_beside_the_new_one() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("blk-stale-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(stale_binary(&dir).is_none());
+
+        fs::write(dir.join("block-list"), "").unwrap();
+        assert_eq!(stale_binary(&dir).unwrap(), dir.join("block-list"));
+        fs::remove_dir_all(dir).ok();
+    }
 }

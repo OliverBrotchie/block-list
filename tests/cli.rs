@@ -270,6 +270,39 @@ fn status_reports_a_live_pause() {
 }
 
 #[test]
+fn status_says_paused_when_nothing_is_active() {
+    let (dir, hosts) = setup("pause-status-empty", "127.0.0.1 localhost\n");
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap()
+        ]
+    )
+    .status
+    .success());
+    assert!(run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "pause", "a.hosts"]
+    )
+    .status
+    .success());
+
+    let out = run(&dir, &["--hosts", hosts.to_str().unwrap(), "status"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains(": paused"), "stdout: {stdout}");
+    assert!(stdout.contains("paused: a.hosts"), "stdout: {stdout}");
+    assert!(
+        !stdout.contains("0 entries in 0 sources"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
 fn an_expired_pause_is_restored_by_the_next_command() {
     let (dir, hosts) = setup("pause-expiry", "127.0.0.1 localhost\n");
     let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
@@ -795,6 +828,7 @@ fn add_while_paused_only_saves_config() {
         .unwrap()
         .contains("tracker.example"));
     assert!(dir.path().join("state").join("pause.toml").exists());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("blk update"));
     let config = fs::read_to_string(dir.path().join("state").join("config.toml")).unwrap();
     assert!(config.contains("b.hosts"), "config: {config}");
 }

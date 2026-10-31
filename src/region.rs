@@ -215,7 +215,10 @@ pub(crate) fn valid_host(host: &str) -> bool {
 }
 
 /// Write through a temp file in the same directory, fsync, rename, keep the mode.
+/// A symlink is followed, so the target is replaced and the link survives.
 pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let path = resolved.as_path();
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = dir.join(format!(".blk.tmp.{}", std::process::id()));
     let _ = fs::remove_file(&tmp);
@@ -321,6 +324,33 @@ mod tests {
         let updated = replace(&text, parsed.as_ref(), &region);
         assert!(updated.ends_with("tail\n"));
         assert_eq!(updated, text);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_atomic_follows_a_symlink() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("blk-region-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target");
+        let link = dir.join("link");
+        fs::write(&target, "old").unwrap();
+        symlink(&target, &link).unwrap();
+
+        write_atomic(&link, "new").unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
