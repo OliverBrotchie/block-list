@@ -1013,3 +1013,16 @@ fn drift_is_skipped_while_paused() {
     );
     assert!(String::from_utf8_lossy(&doctor.stdout).contains("skipped while paused"));
 }
+
+#[test]
+fn update_unknown_source_names_candidates() {
+    let (dir, hosts) = setup("unknown-update", "127.0.0.1 localhost\n");
+    let out = run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "update", "nope"],
+    );
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("unknown source nope"), "stderr: {stderr}");
+    assert!(stderr.contains("brave/default"), "stderr: {stderr}");
+}

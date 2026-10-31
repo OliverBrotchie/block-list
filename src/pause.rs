@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -70,24 +71,31 @@ pub fn snapshot_path(dir: &Path) -> PathBuf {
     dir.join("pause.region")
 }
 
-pub fn load(dir: &Path) -> Result<Option<Pause>, Box<dyn std::error::Error>> {
+pub fn load(dir: &Path) -> Result<Option<Pause>> {
     let path = record_path(dir);
     if !path.exists() {
         return Ok(None);
     }
-    let text = fs::read_to_string(&path)?;
-    Ok(Some(toml::from_str(&text)?))
+    let text = fs::read_to_string(&path)
+        .map_err(|err| Error::io("read", path.display().to_string(), err))?;
+    Ok(Some(toml::from_str(&text).map_err(|err| {
+        Error::toml_decode(path.display().to_string(), err)
+    })?))
 }
 
 pub fn load_snapshot(dir: &Path) -> Option<String> {
     fs::read_to_string(snapshot_path(dir)).ok()
 }
 
-pub fn save(dir: &Path, pause: &Pause, region: &str) -> Result<(), Box<dyn std::error::Error>> {
-    fs::create_dir_all(dir)?;
-    let text = toml::to_string(pause)?;
-    fs::write(record_path(dir), text)?;
-    fs::write(snapshot_path(dir), region)?;
+pub fn save(dir: &Path, pause: &Pause, region: &str) -> Result<()> {
+    fs::create_dir_all(dir).map_err(|err| Error::io("create", dir.display().to_string(), err))?;
+    let path = record_path(dir);
+    let text = toml::to_string(pause)
+        .map_err(|err| Error::toml_encode(path.display().to_string(), err))?;
+    fs::write(&path, text).map_err(|err| Error::io("write", path.display().to_string(), err))?;
+    let snapshot = snapshot_path(dir);
+    fs::write(&snapshot, region)
+        .map_err(|err| Error::io("write", snapshot.display().to_string(), err))?;
     Ok(())
 }
 

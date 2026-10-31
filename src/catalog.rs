@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::error::{Error, Result};
 use crate::region;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,8 +138,13 @@ pub fn ids() -> Vec<&'static str> {
     SOURCES.iter().map(|source| source.id).collect()
 }
 
-pub fn get_or_error(id: &str) -> Result<&'static Source, String> {
-    get(id).ok_or_else(|| format!("unknown source {id}; known sources: {}", ids().join(", ")))
+pub fn get_or_error(id: &str) -> Result<&'static Source> {
+    get(id).ok_or_else(|| {
+        Error::msg(format!(
+            "unknown source {id}; known sources: {}",
+            ids().join(", ")
+        ))
+    })
 }
 
 #[derive(Debug, Default)]
@@ -282,7 +288,7 @@ mod tests {
     #[test]
     fn unknown_ids_name_the_candidates() {
         let error = get_or_error("nope").unwrap_err();
-        assert!(error.contains("brave/default"), "{error}");
+        assert!(error.to_string().contains("brave/default"), "{error}");
         assert!(get("oisd/small").is_some());
     }
 

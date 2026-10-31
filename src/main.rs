@@ -1,11 +1,11 @@
 mod catalog;
 mod config;
+mod error;
 mod pause;
 mod region;
 mod sources;
 mod state;
 
-use std::error::Error;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, Input, MultiSelect, Select};
+
+use error::{Error, Result};
 
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
@@ -108,7 +110,7 @@ fn main() {
     }
 }
 
-fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
+fn run(cli: &Cli) -> Result<()> {
     let state = state_dir();
     match &cli.command {
         Some(Cmd::Update { sources, from }) => update(cli, &state, sources, from),
@@ -127,7 +129,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn bare(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn bare(cli: &Cli, state: &Path) -> Result<()> {
     if std::io::stdin().is_terminal() {
         return menu(cli, state);
     }
@@ -138,7 +140,7 @@ fn bare(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     std::process::exit(2);
 }
 
-fn menu(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn menu(cli: &Cli, state: &Path) -> Result<()> {
     let items = [
         "Status",
         "Update",
@@ -181,7 +183,7 @@ fn menu(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn pause_menu(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn pause_menu(cli: &Cli, state: &Path) -> Result<()> {
     let contents = read_hosts(&cli.hosts)?;
     let Some(parsed) = region::parse(&contents)? else {
         println!("no block region");
@@ -214,7 +216,7 @@ fn pause_menu(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     pause_command(cli, state, &args)
 }
 
-fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(), Box<dyn Error>> {
+fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<()> {
     if !cli.dry_run {
         restore_expired(state)?;
     }
@@ -234,9 +236,11 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
 }
 
 /// Fetch or read every source, then replace the region in one write.
-fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<(), Box<dyn Error>> {
+fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<()> {
     if sources.is_empty() {
-        return Err("no sources configured; run `blk sources` or `blk add`".into());
+        return Err(Error::msg(
+            "no sources configured; run `blk sources` or `blk add`",
+        ));
     }
 
     let contents = read_hosts(&cli.hosts)?;
@@ -326,7 +330,7 @@ fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<(
     Ok(())
 }
 
-fn sources_command(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn sources_command(cli: &Cli, state: &Path) -> Result<()> {
     if !cli.dry_run {
         restore_expired(state)?;
     }
@@ -373,7 +377,7 @@ fn sources_command(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     change_sources(cli, state, chosen, "sources selected")
 }
 
-fn add_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<(), Box<dyn Error>> {
+fn add_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
     for source in sources {
         validate_source(source)?;
     }
@@ -387,11 +391,11 @@ fn add_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<(), Box<dy
     change_sources(cli, state, chosen, "sources added")
 }
 
-fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<(), Box<dyn Error>> {
+fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
     let config = config::load(state)?;
     for source in sources {
         if !config.sources.contains(source) {
-            return Err(format!("{source} is not configured").into());
+            return Err(Error::msg(format!("{source} is not configured")));
         }
     }
     let remaining = config
@@ -403,12 +407,7 @@ fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<(), Box<dyn
 }
 
 /// Save a new source list, then apply it unless a live pause holds the region.
-fn change_sources(
-    cli: &Cli,
-    state: &Path,
-    sources: Vec<String>,
-    message: &str,
-) -> Result<(), Box<dyn Error>> {
+fn change_sources(cli: &Cli, state: &Path, sources: Vec<String>, message: &str) -> Result<()> {
     let sources = dedupe(sources);
 
     if cli.dry_run {
@@ -453,7 +452,7 @@ fn change_sources(
     Ok(())
 }
 
-fn validate_source(source: &str) -> Result<(), Box<dyn Error>> {
+fn validate_source(source: &str) -> Result<()> {
     if catalog::get(source).is_some()
         || source.starts_with("http://")
         || source.starts_with("https://")
@@ -461,11 +460,10 @@ fn validate_source(source: &str) -> Result<(), Box<dyn Error>> {
     {
         return Ok(());
     }
-    Err(format!(
+    Err(Error::msg(format!(
         "unknown source {source}; known ids: {}",
         catalog::ids().join(", ")
-    )
-    .into())
+    )))
 }
 
 fn dedupe(sources: Vec<String>) -> Vec<String> {
@@ -478,7 +476,7 @@ fn dedupe(sources: Vec<String>) -> Vec<String> {
     out
 }
 
-fn clear_region(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn clear_region(cli: &Cli, state: &Path) -> Result<()> {
     let contents = read_hosts(&cli.hosts)?;
     let Some(parsed) = region::parse(&contents)? else {
         return Ok(());
@@ -492,7 +490,7 @@ fn clear_region(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn status(cli: &Cli, state: &Path, json: bool) -> Result<(), Box<dyn Error>> {
+fn status(cli: &Cli, state: &Path, json: bool) -> Result<()> {
     if !cli.dry_run {
         restore_expired(state)?;
     }
@@ -557,7 +555,7 @@ fn status_json(
     contents: &str,
     parsed: Option<&region::Parsed>,
     record: Option<&pause::Pause>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     let sources: Vec<(String, usize)> = parsed
         .map(|parsed| {
             parsed
@@ -620,7 +618,7 @@ fn status_warnings(
     state: &Path,
     contents: &str,
     parsed: Option<&region::Parsed>,
-) -> Result<Vec<String>, Box<dyn Error>> {
+) -> Result<Vec<String>> {
     let mut warnings = Vec::new();
     if contents.contains("# Block List") {
         warnings.push("legacy-block-list".to_string());
@@ -665,7 +663,7 @@ fn json_string(value: &str) -> String {
     out
 }
 
-fn test_domain(cli: &Cli, state: &Path, domain: &str) -> Result<(), Box<dyn Error>> {
+fn test_domain(cli: &Cli, state: &Path, domain: &str) -> Result<()> {
     if !cli.dry_run {
         restore_expired(state)?;
     }
@@ -707,7 +705,7 @@ fn test_domain(cli: &Cli, state: &Path, domain: &str) -> Result<(), Box<dyn Erro
     Ok(())
 }
 
-fn doctor(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn doctor(cli: &Cli, state: &Path) -> Result<()> {
     if !cli.dry_run {
         restore_expired(state)?;
     }
@@ -772,7 +770,7 @@ fn doctor(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     }
 
     if problems > 0 {
-        Err(format!("doctor found {problems} problems").into())
+        Err(Error::msg(format!("doctor found {problems} problems")))
     } else {
         println!("doctor: ok");
         Ok(())
@@ -805,31 +803,34 @@ fn cached_abp_counts(path: &Path) -> Option<(usize, usize, usize)> {
     any.then_some((kept, cosmetic, other))
 }
 
-fn config_command(state: &Path) -> Result<(), Box<dyn Error>> {
-    fs::create_dir_all(state)?;
+fn config_command(state: &Path) -> Result<()> {
+    fs::create_dir_all(state)
+        .map_err(|err| Error::io("create", state.display().to_string(), err))?;
     let path = config::path(state);
     if !path.exists() {
         config::save(state, &config::Config::default())?;
     }
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-    let status = std::process::Command::new(editor).arg(&path).status()?;
+    let status = std::process::Command::new(&editor)
+        .arg(&path)
+        .status()
+        .map_err(|err| Error::io("start", editor.clone(), err))?;
     if !status.success() {
-        return Err("editor exited with an error".into());
+        return Err(Error::msg("editor exited with an error"));
     }
     Ok(())
 }
 
-fn off(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn off(cli: &Cli, state: &Path) -> Result<()> {
     if !cli.dry_run {
         end_expired_pause(state)?;
     }
     if let Some(record) = pause::load(state)? {
         if !(cli.dry_run && record.is_expired(pause::now())) {
-            return Err(format!(
+            return Err(Error::msg(format!(
                 "already paused ({}); run blk resume first",
                 describe(&record)
-            )
-            .into());
+            )));
         }
     }
 
@@ -874,24 +875,26 @@ fn off(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<(), Box<dyn Error>> {
-    let (sources, until) = split_args(args)?;
+fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
+    let (sources, until) = split_args(args);
     if !cli.dry_run {
         end_expired_pause(state)?;
     }
     if let Some(record) = pause::load(state)? {
         if !(cli.dry_run && record.is_expired(pause::now())) {
-            return Err(format!(
+            return Err(Error::msg(format!(
                 "already paused ({}); run blk resume first",
                 describe(&record)
-            )
-            .into());
+            )));
         }
     }
 
     let contents = read_hosts(&cli.hosts)?;
     let Some(parsed) = region::parse(&contents)? else {
-        return Err(format!("{} has no block region to pause", cli.hosts.display()).into());
+        return Err(Error::msg(format!(
+            "{} has no block region to pause",
+            cli.hosts.display()
+        )));
     };
 
     let known: Vec<String> = parsed
@@ -906,11 +909,10 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<(), Box<dyn
     };
     for target in &targets {
         if !known.contains(target) {
-            return Err(format!(
+            return Err(Error::msg(format!(
                 "unknown source {target}; known sources: {}",
                 known.join(", ")
-            )
-            .into());
+            )));
         }
     }
 
@@ -954,7 +956,7 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<(), Box<dyn
     hold(state, &record)
 }
 
-fn resume(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+fn resume(cli: &Cli, state: &Path) -> Result<()> {
     let Some(record) = pause::load(state)? else {
         println!("not paused");
         return Ok(());
@@ -975,7 +977,7 @@ fn resume(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 /// Wait out a pause in the foreground, or report that nobody will restore it.
-fn hold(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>> {
+fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
     if !std::io::stdin().is_terminal() {
         println!("nothing will restore this pause automatically; run `blk resume`");
         return Ok(());
@@ -1017,14 +1019,13 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>> {
 }
 
 /// Restore the exact region saved at pause time.
-fn resume_from(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>> {
+fn resume_from(state: &Path, record: &pause::Pause) -> Result<()> {
     let hosts = &record.hosts_path;
     let Some(snapshot) = pause::load_snapshot(state) else {
-        return Err(format!(
+        return Err(Error::msg(format!(
             "the saved region for {} is missing; run `blk update` to rebuild it",
             hosts.display()
-        )
-        .into());
+        )));
     };
     let contents = read_hosts(hosts)?;
     let parsed = region::parse(&contents)?;
@@ -1037,7 +1038,7 @@ fn resume_from(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>
 }
 
 /// A later command takes over an expired pause. Without root, report it instead.
-fn end_expired_pause(state: &Path) -> Result<(), Box<dyn Error>> {
+fn end_expired_pause(state: &Path) -> Result<()> {
     let Some(record) = pause::load(state)? else {
         return Ok(());
     };
@@ -1053,14 +1054,14 @@ fn end_expired_pause(state: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn restore_expired(state: &Path) -> Result<(), Box<dyn Error>> {
+fn restore_expired(state: &Path) -> Result<()> {
     if let Err(err) = end_expired_pause(state) {
         eprintln!("warning: {err}");
     }
     Ok(())
 }
 
-fn split_args(args: &[String]) -> Result<(Vec<String>, Option<u64>), Box<dyn Error>> {
+fn split_args(args: &[String]) -> (Vec<String>, Option<u64>) {
     let mut sources = args.to_vec();
     let mut until = None;
     if let Some(last) = sources.last() {
@@ -1069,7 +1070,7 @@ fn split_args(args: &[String]) -> Result<(Vec<String>, Option<u64>), Box<dyn Err
             until = Some(pause::now() + seconds);
         }
     }
-    Ok((sources, until))
+    (sources, until)
 }
 
 fn describe(record: &pause::Pause) -> String {
@@ -1131,7 +1132,7 @@ fn install_signal_handlers() {
     }
 }
 
-fn catalog_command(id: Option<&str>) -> Result<(), Box<dyn Error>> {
+fn catalog_command(id: Option<&str>) -> Result<()> {
     match id {
         None => {
             for source in catalog::SOURCES {
@@ -1162,8 +1163,8 @@ fn catalog_command(id: Option<&str>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn read_hosts(path: &Path) -> Result<String, Box<dyn Error>> {
-    fs::read_to_string(path).map_err(|err| format!("cannot read {}: {err}", path.display()).into())
+fn read_hosts(path: &Path) -> Result<String> {
+    fs::read_to_string(path).map_err(|err| Error::io("read", path.display().to_string(), err))
 }
 
 /// Writing the hosts file needs root. BLK_DIR marks a test run, where the target is a temp file.
@@ -1171,11 +1172,14 @@ fn can_write() -> bool {
     std::env::var_os("BLK_DIR").is_some() || unsafe { libc::geteuid() } == 0
 }
 
-fn require_root(hosts: &Path) -> Result<(), Box<dyn Error>> {
+fn require_root(hosts: &Path) -> Result<()> {
     if can_write() {
         return Ok(());
     }
-    Err(format!("writing {} requires root; run with sudo", hosts.display()).into())
+    Err(Error::msg(format!(
+        "writing {} requires root; run with sudo",
+        hosts.display()
+    )))
 }
 
 fn state_dir() -> PathBuf {
@@ -1185,27 +1189,26 @@ fn state_dir() -> PathBuf {
 }
 
 /// Keep the first version of the hosts file this tool ever modifies.
-fn backup(hosts: &Path) -> Result<(), Box<dyn Error>> {
+fn backup(hosts: &Path) -> Result<()> {
     let dir = state_dir();
-    fs::create_dir_all(&dir).map_err(|err| format!("cannot create {}: {err}", dir.display()))?;
+    fs::create_dir_all(&dir).map_err(|err| Error::io("create", dir.display().to_string(), err))?;
     let backup = dir.join("hosts.bak");
     if !backup.exists() {
         fs::copy(hosts, &backup)
-            .map_err(|err| format!("cannot write backup {}: {err}", backup.display()))?;
+            .map_err(|err| Error::io("write", backup.display().to_string(), err))?;
     }
     Ok(())
 }
 
-fn write_hosts(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
+fn write_hosts(path: &Path, contents: &str) -> Result<()> {
     region::write_atomic(path, contents).map_err(|err| {
-        let message = if err.kind() == std::io::ErrorKind::PermissionDenied {
-            format!(
+        if err.kind() == std::io::ErrorKind::PermissionDenied {
+            Error::msg(format!(
                 "permission denied writing {}; run with sudo",
                 path.display()
-            )
+            ))
         } else {
-            format!("cannot write {}: {err}", path.display())
-        };
-        Box::<dyn Error>::from(message)
+            Error::io("write", path.display().to_string(), err)
+        }
     })
 }

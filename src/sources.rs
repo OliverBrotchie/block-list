@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::catalog::{self, Format};
+use crate::error::{Error, Result};
 use crate::region::{self, Entry};
 
 #[derive(Debug)]
@@ -33,7 +34,7 @@ pub fn load_all(
     sources: &[String],
     offline: bool,
     write_cache: bool,
-) -> Result<Vec<Loaded>, String> {
+) -> Result<Vec<Loaded>> {
     let mut used = HashSet::new();
     let mut loaded = Vec::new();
     for source in sources {
@@ -48,9 +49,16 @@ fn load(
     offline: bool,
     write_cache: bool,
     used: &mut HashSet<String>,
-) -> Result<Loaded, String> {
+) -> Result<Loaded> {
     if let Some(entry) = catalog::get(source) {
         return load_catalog(dir, source, entry, offline, write_cache);
+    }
+
+    if !is_url(source) && !Path::new(source).exists() {
+        return Err(Error::msg(format!(
+            "unknown source {source}; known ids: {}",
+            catalog::ids().join(", ")
+        )));
     }
 
     let name = unique_name(sanitize(source), source, used);
@@ -59,12 +67,12 @@ fn load(
         fetch_or_cache(source, &path, offline, write_cache)?
     } else {
         let text =
-            fs::read_to_string(source).map_err(|err| format!("cannot read {source}: {err}"))?;
+            fs::read_to_string(source).map_err(|err| Error::io("read", source.to_string(), err))?;
         (text, false)
     };
     let (entries, warnings) = region::entries_from_hosts(&text);
     if entries.is_empty() {
-        return Err(format!("{source} contains no usable entries"));
+        return Err(Error::msg(format!("{source} contains no usable entries")));
     }
     Ok(Loaded {
         name,
@@ -81,7 +89,7 @@ fn load_catalog(
     entry: &catalog::Source,
     offline: bool,
     write_cache: bool,
-) -> Result<Loaded, String> {
+) -> Result<Loaded> {
     let root = cache_path(dir, id);
     let mut entries: Vec<Entry> = Vec::new();
     let mut seen = HashSet::new();
@@ -107,7 +115,7 @@ fn load_catalog(
                         warnings.push(format!("{url} contains no usable entries"));
                         continue;
                     }
-                    return Err(format!("{url} contains no usable entries"));
+                    return Err(Error::msg(format!("{url} contains no usable entries")));
                 }
                 merge(&mut entries, &mut seen, parsed);
             }
@@ -118,7 +126,7 @@ fn load_catalog(
                         warnings.push(format!("{url} yielded no domains"));
                         continue;
                     }
-                    return Err(format!("{url} yielded no domains"));
+                    return Err(Error::msg(format!("{url} yielded no domains")));
                 }
                 if entry.format == Format::Abp {
                     abp = true;
@@ -162,10 +170,13 @@ fn fetch_or_cache(
     path: &Path,
     offline: bool,
     write_cache: bool,
-) -> Result<(String, bool), String> {
+) -> Result<(String, bool)> {
     if offline {
-        let body = fs::read_to_string(path)
-            .map_err(|_| format!("no cached copy of {url}; run an online update first"))?;
+        let body = fs::read_to_string(path).map_err(|_| {
+            Error::msg(format!(
+                "no cached copy of {url}; run an online update first"
+            ))
+        })?;
         return Ok((body, false));
     }
 
@@ -178,20 +189,22 @@ fn fetch_or_cache(
     match request.call() {
         Ok(response) if response.status() == 304 => {
             let body = fs::read_to_string(path)
-                .map_err(|_| format!("{url} returned 304 but nothing is cached"))?;
+                .map_err(|_| Error::msg(format!("{url} returned 304 but nothing is cached")))?;
             Ok((body, false))
         }
         Ok(response) => {
             let etag = response.header("etag").map(str::to_string);
             let body = response
                 .into_string()
-                .map_err(|error| format!("cannot read {url}: {error}"))?;
+                .map_err(|error| Error::io("read", url.to_string(), error))?;
             if write_cache {
                 if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+                    fs::create_dir_all(parent).map_err(|error| {
+                        Error::io("create", parent.display().to_string(), error)
+                    })?;
                 }
-                fs::write(path, &body).map_err(|error| format!("cannot cache {url}: {error}"))?;
+                fs::write(path, &body)
+                    .map_err(|error| Error::io("cache", path.display().to_string(), error))?;
                 let _ = fs::write(sidecar(path, "src"), url);
                 match etag {
                     Some(etag) => {
@@ -206,10 +219,10 @@ fn fetch_or_cache(
         }
         Err(ureq::Error::Status(304, _)) => {
             let body = fs::read_to_string(path)
-                .map_err(|_| format!("{url} returned 304 but nothing is cached"))?;
+                .map_err(|_| Error::msg(format!("{url} returned 304 but nothing is cached")))?;
             Ok((body, false))
         }
-        Err(error) => Err(format!("cannot fetch {url}: {error}")),
+        Err(error) => Err(Error::fetch(url, error)),
     }
 }
 
@@ -345,7 +358,7 @@ mod tests {
             false,
         )
         .unwrap_err();
-        assert!(error.contains("no cached copy"), "{error}");
+        assert!(error.to_string().contains("no cached copy"), "{error}");
         fs::remove_dir_all(dir).ok();
     }
 
