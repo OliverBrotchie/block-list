@@ -98,6 +98,7 @@ fn load_catalog(
     let mut counts = Counts::default();
     let mut abp = false;
     let mut fetched = false;
+    let mut empty_domains = 0usize;
     let mut warnings = Vec::new();
 
     for domain in entry.inline {
@@ -137,7 +138,7 @@ fn load_catalog(
                 let parsed = catalog::parse(&text, entry.format);
                 if parsed.domains.is_empty() {
                     if entry.urls.len() > 1 {
-                        warnings.push(format!("{url} yielded no domains"));
+                        empty_domains += 1;
                         continue;
                     }
                     return Err(Error::NoDomains {
@@ -162,6 +163,15 @@ fn load_catalog(
                 }
             }
         }
+    }
+
+    // Expected for exception-only and cosmetic bundle members. Report it once,
+    // when something was actually downloaded, not on every cached apply.
+    if empty_domains > 0 && fetched {
+        warnings.push(format!(
+            "{empty_domains} of {} bundle files yielded no domains",
+            entry.urls.len()
+        ));
     }
 
     Ok(Loaded {
