@@ -23,13 +23,25 @@ pub struct Section {
 #[derive(Debug)]
 pub struct Parsed {
     /// Byte offset of the `# BEGIN blk` line.
-    pub begin: usize,
+    begin: usize,
     /// Byte offset just past the `# END blk` line.
-    pub end: usize,
+    end: usize,
     pub sections: Vec<Section>,
 }
 
-#[derive(Debug)]
+impl Parsed {
+    /// The managed region, markers included.
+    pub fn region<'a>(&self, contents: &'a str) -> &'a str {
+        &contents[self.begin..self.end]
+    }
+
+    /// The file with the managed region removed.
+    pub fn outside(&self, contents: &str) -> String {
+        format!("{}{}", &contents[..self.begin], &contents[self.end..])
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct RegionError(pub String);
 
 impl std::fmt::Display for RegionError {
