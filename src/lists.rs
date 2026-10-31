@@ -119,6 +119,49 @@ fn dedupe(sources: Vec<String>) -> Vec<String> {
     out
 }
 
+#[derive(Debug, PartialEq)]
+pub struct PauseTarget {
+    pub label: String,
+    pub sources: Vec<String>,
+}
+
+/// Enabled lists first, then the sections they do not cover.
+pub fn pause_targets(config: &Config, sections: &[String]) -> Vec<PauseTarget> {
+    let mut targets = Vec::new();
+    let mut covered: Vec<String> = Vec::new();
+    for view in views(config).iter().filter(|view| view.enabled) {
+        let present: Vec<String> = view
+            .sources
+            .iter()
+            .map(|source| crate::sources::section_name(source))
+            .filter(|name| sections.contains(name))
+            .collect();
+        if present.is_empty() {
+            continue;
+        }
+        for name in &present {
+            if !covered.contains(name) {
+                covered.push(name.clone());
+            }
+        }
+        let count = present.len();
+        let noun = if count == 1 { "source" } else { "sources" };
+        targets.push(PauseTarget {
+            label: format!("List · {} ({count} {noun})", view.name),
+            sources: present,
+        });
+    }
+    for name in sections {
+        if !covered.contains(name) {
+            targets.push(PauseTarget {
+                label: format!("Source · {name}"),
+                sources: vec![name.clone()],
+            });
+        }
+    }
+    targets
+}
+
 /// The state after a toggle, and which enabled lists held shared sources back.
 pub struct Toggle {
     pub enabled: bool,
@@ -348,6 +391,51 @@ mod tests {
             toggle(&mut config, "nope"),
             Err(Error::ListNotFound { .. })
         ));
+    }
+
+    #[test]
+    fn pause_targets_group_lists_before_sources() {
+        let config = config_with(&["blk/social"]);
+        let sections = owned(&["blk/social", "x.hosts"]);
+        let targets = pause_targets(&config, &sections);
+
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].label, "List · Social media (1 source)");
+        assert_eq!(targets[0].sources, owned(&["blk/social"]));
+        assert_eq!(targets[1].label, "Source · x.hosts");
+        assert_eq!(targets[1].sources, owned(&["x.hosts"]));
+    }
+
+    #[test]
+    fn pause_targets_map_url_sections_into_a_custom_list() {
+        let source = "https://example.test/lists/x.hosts".to_string();
+        let config = Config {
+            sources: vec![source.clone()],
+            lists: vec![List {
+                name: "Focus".into(),
+                sources: vec![source],
+            }],
+        };
+        let targets = pause_targets(&config, &owned(&["x.hosts"]));
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].label, "List · Focus (1 source)");
+        assert_eq!(targets[0].sources, owned(&["x.hosts"]));
+    }
+
+    #[test]
+    fn pause_targets_leave_disabled_lists_as_sources() {
+        let config = Config {
+            sources: owned(&["oisd/small"]),
+            lists: vec![List {
+                name: "Focus".into(),
+                sources: owned(&["oisd/small", "oisd/big"]),
+            }],
+        };
+        let targets = pause_targets(&config, &owned(&["oisd/small"]));
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].label, "Source · oisd/small");
     }
 
     #[test]

@@ -317,23 +317,29 @@ fn has_blocked_sources(cli: &Cli) -> bool {
     }
 }
 
+fn blocking_items(has_sources: bool, blocked: bool, paused: bool) -> Vec<&'static str> {
+    let mut items = vec!["Show status"];
+    if has_sources {
+        items.push("Update now");
+    }
+    if blocked && !paused {
+        items.push("Pause");
+        items.push("Turn off");
+    }
+    if paused {
+        items.push("Resume");
+    }
+    items.push("Back");
+    items
+}
+
 fn blocking_menu(cli: &Cli, state: &Path) -> Result<()> {
     loop {
         clear_screen();
         let record = pause::load(state)?.filter(|record| !record.is_expired(pause::now()));
         let blocked = has_blocked_sources(cli);
-        let mut items = vec!["Show status"];
-        if !config::load(state)?.sources.is_empty() {
-            items.push("Update now");
-        }
-        if blocked && record.is_none() {
-            items.push("Pause");
-            items.push("Turn off");
-        }
-        if record.is_some() {
-            items.push("Resume");
-        }
-        items.push("Back");
+        let has_sources = !config::load(state)?.sources.is_empty();
+        let items = blocking_items(has_sources, blocked, record.is_some());
         let prompt = if record.is_some() {
             "Blocking · paused".to_string()
         } else if blocked {
@@ -690,36 +696,8 @@ fn pause_menu(cli: &Cli, state: &Path) -> Result<()> {
         .map(|section| section.name.clone())
         .collect();
     let config = config::load(state)?;
-    let mut items = Vec::new();
-    let mut targets: Vec<Vec<String>> = Vec::new();
-    let mut covered: Vec<String> = Vec::new();
-
-    for view in lists::views(&config).iter().filter(|view| view.enabled) {
-        let present: Vec<String> = view
-            .sources
-            .iter()
-            .map(|source| sources::section_name(source))
-            .filter(|name| names.contains(name))
-            .collect();
-        if present.is_empty() {
-            continue;
-        }
-        for name in &present {
-            if !covered.contains(name) {
-                covered.push(name.clone());
-            }
-        }
-        let count = present.len();
-        let noun = if count == 1 { "source" } else { "sources" };
-        items.push(format!("List · {} ({count} {noun})", view.name));
-        targets.push(present);
-    }
-    for name in &names {
-        if !covered.contains(name) {
-            items.push(format!("Source · {name}"));
-            targets.push(vec![name.clone()]);
-        }
-    }
+    let targets = lists::pause_targets(&config, &names);
+    let items: Vec<String> = targets.iter().map(|target| target.label.clone()).collect();
     if items.is_empty() {
         println!("nothing to pause");
         return Ok(());
@@ -740,7 +718,7 @@ fn pause_menu(cli: &Cli, state: &Path) -> Result<()> {
 
     let mut args: Vec<String> = Vec::new();
     for index in picked {
-        for name in &targets[index] {
+        for name in &targets[index].sources {
             if !args.contains(name) {
                 args.push(name.clone());
             }
@@ -1707,6 +1685,28 @@ fn state_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocking_menu_shows_only_actions_that_apply() {
+        assert_eq!(
+            blocking_items(false, false, false),
+            vec!["Show status", "Back"]
+        );
+        assert_eq!(
+            blocking_items(true, false, false),
+            vec!["Show status", "Update now", "Back"]
+        );
+        assert_eq!(
+            blocking_items(true, true, false),
+            vec!["Show status", "Update now", "Pause", "Turn off", "Back"]
+        );
+        assert_eq!(
+            blocking_items(true, false, true),
+            vec!["Show status", "Update now", "Resume", "Back"]
+        );
+        assert!(!blocking_items(true, true, true).contains(&"Pause"));
+        assert!(!blocking_items(true, true, true).contains(&"Turn off"));
+    }
 
     #[test]
     fn finds_a_legacy_binary_beside_the_new_one() {
