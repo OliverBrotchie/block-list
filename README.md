@@ -1,138 +1,159 @@
-<div align="center">
+# blk
 
-  <h1><code>block-list</code></h1>
+A hosts-based block list manager for macOS and Linux. `blk` keeps one managed region inside your hosts file, leaves the rest of the file alone, and can pause blocking for a set time without losing your settings.
 
-  <strong>A minimalist hosts-based tool for managing block lists and ad-blocking.</strong>
+- Blocking applies to every program that uses the system resolver.
+- The managed region is visible in the file, between `# BEGIN blk` and `# END blk`.
+- Lists refresh with conditional requests, so a daily run downloads nothing when nothing changed.
+- Pausing restores the exact previous region on expiry, Ctrl-C, or terminal close.
 
-</div>
-
-
-# About
-
-A minimalist hosts-based tool for managing block lists and ad-blocking.
-
-This project uses the excellent and regularly updated [Unified Hosts](https://github.com/StevenBlack/hosts) lists from Steven Black.
-
-
-
-## Why should you use Block List?
-
-- It is an extensible, small and simple tool; consisting of only fifty-five lines of code!
-- It will block this traffic across all programs running on the system. 
-- It is written in Rust and hence can be depended upon to be fast and stable. 
-- It is designed to be easily incorporated into shell scripts to automate or customize its behaviour to your liking.
-- A hosts-based block list such as this uses minimal system resources to block unwanted traffic in comparison to a browser extension.
-
-## Installation
-
-Using Cargo (Rust)
+## Install
 
 ```shell
 cargo install block-list
 ```
 
-More options will come in future!
+The package is `block-list` and the binary is `blk`.
 
-## Usage
-
-Just use 'hosts' as the desired list if you only want ad-blocking.
+## Quick start
 
 ```shell
-sudo block-list /path/to/hosts your-desired-list
+sudo blk sources      # choose providers interactively
+sudo blk update       # fetch and write /etc/hosts
+blk status            # show what is active
+sudo blk doctor       # check the file, cache, backup, and drift
 ```
 
-## Examples
+Running `blk` with no arguments on a terminal opens a menu with the same actions.
 
-**Basic usage:**
+## Commands
+
+| command | what it does |
+| --- | --- |
+| `blk status [--json]` | show the region, source counts, last update, pause, and warnings |
+| `blk update [SOURCE...]` | fetch the configured sources and rewrite the region |
+| `blk sources` | choose sources from the catalog, interactive |
+| `blk add <SOURCE>...` | add a source and apply |
+| `blk rm <SOURCE>...` | remove a source and rebuild |
+| `blk pause [SOURCE...] [DURATION]` | pause all or some sources, for example `30m` |
+| `blk resume` | restore a paused region |
+| `blk off` | pause every source with no deadline |
+| `blk test <DOMAIN>` | report whether a domain is blocked |
+| `blk doctor` | check markers, cache, backup, and drift; exit 1 on problems |
+| `blk config` | open the config file in `$EDITOR` |
+| `blk catalog [SOURCE]` | list the built-in sources, or print one source's URLs |
+
+## Options
+
+| option | meaning |
+| --- | --- |
+| `--hosts <PATH>` | hosts file to edit, default `/etc/hosts` |
+| `--offline` | rebuild from the cache, no network |
+| `--dry-run` | print what would change, write nothing |
+| `--yes` | skip the confirmation prompt |
+| `--quiet` | suppress normal output |
+
+## Pausing
 
 ```shell
-sudo block-list /etc/hosts social
+sudo blk pause stevenblack/social 30m   # pause one source for 30 minutes
+sudo blk pause                          # pause every source until Ctrl-C
+sudo blk off                            # pause every source indefinitely
+sudo blk resume                         # restore now
 ```
 
-<br>
+The pause holds the terminal and shows the time left. Expiry, Ctrl-C, SIGTERM, and closing the terminal all restore the previous region. Without a terminal, `pause` exits immediately and says nothing will restore it automatically. If the process is killed with SIGKILL, the record survives and the next command reports the live pause.
 
-**Pipe in a custom list:**
+## Sources
+
+`blk catalog` lists the built-in sources:
+
+```
+brave/default            abp       22 urls  MPL-2.0 plus upstream terms
+stevenblack/hosts        hosts      1 url   MIT
+stevenblack/social       hosts      1 url   MIT
+oisd/small               wildcard   1 url   GPL-3.0
+hagezi/normal            domains    1 url   GPL-3.0
+1hosts/lite              hosts      1 url   MPL-2.0
+```
+
+Add a URL or a local list with `blk add`, or append it with `blk update --from`. Both save the source:
 
 ```shell
-cat someFile.txt | sudo block-list /etc/hosts
+sudo blk add https://example.com/list.hosts
+sudo blk update --from /path/to/list.hosts
 ```
 
-**OR**
+## ABP lists
 
-```shell
-cat someFile.txt | sudo block-list /etc/hosts social
+`brave/default` is an ABP bundle, not a hosts file, so it is converted. The converter keeps `||domain^` rules, subtracts domains named by `@@||domain^` exceptions, and drops cosmetic, path, option, regex, and `$badfilter` rules. It prints how many rules were kept and dropped the first time it fetches a list.
+
+The conversion is approximate. A hosts file cannot express exceptions, paths, options, or cosmetic rules, and it blocks exact hostnames only. See the limits below.
+
+## Files
+
+`blk` keeps its state in `/etc/blk`:
+
+| file | contents |
+| --- | --- |
+| `config.toml` | the ordered source list |
+| `state.toml` | last update, region hash, per-source counts |
+| `pause.toml` | the current pause record |
+| `pause.region` | the region as it was when the pause started |
+| `hosts.bak` | a copy of the hosts file from before the first change |
+| `cache/` | downloaded lists, with `.etag` sidecars |
+
+Set `BLK_DIR` to use a different directory. The test suite uses it.
+
+## How the hosts file changes
+
+`blk` writes one region:
+
+```
+# BEGIN blk
+# list: stevenblack/social
+0.0.0.0 ads.example
+# list: hagezi/normal
+0.0.0.0 tracker.example
+# END blk
 ```
 
-<br>
+Only the region is rewritten. Anything before or after it stays as it was. Writes go through a temp file in the same directory, an fsync, and a rename, and the original mode is kept.
 
-**Automatically update Block List at 10pm every day:**
+## Limits
 
-Open the root user's crontab file
+- A hosts entry blocks one exact hostname. Subdomains are blocked only when the list includes them. ABP's `||example.com^` covers subdomains, which a hosts file cannot.
+- ABP conversion is lossy for the reasons above. Brave's bundle is mostly cosmetic and path rules, so only part of it becomes hosts entries.
+- A legacy `# Block List` section from version 1 is never read, migrated, or removed. Remove it by hand after upgrading.
 
-```shell
-sudo crontab -e
-```
+## Scheduled updates
 
-Then add the following line
+Add this to root's crontab to refresh every night at 22:00:
 
 ```txt
-0 22 * * * block-list /etc/hosts hosts
+0 22 * * * blk update
 ```
 
-<br>
+Conditional requests mean the run is cheap when no list changed.
 
-**Use Block List to re-route a url to a different address:**
+## Upgrading from 1.x
 
-Find the address using dig
+- The binary is now `blk`, not `block-list`.
+- The hosts path is no longer a positional argument. It defaults to `/etc/hosts`; use `--hosts` to override.
+- Lists come from the catalog. Run `blk sources` or `blk add`.
+- The region format changed. An old `# Block List` tail is left untouched.
+- State lives in `/etc/blk`.
+
+## Development
 
 ```shell
-dig duckduckgo.com
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
 ```
 
-Coppy the IP address listed in 'Answer Section' to a file
-
-```txt
-# A custom Block List
-
-# Re-route all requests from Google to DuckDuckGo
-52.142.124.215 www.google.com
-52.142.124.215 google.com
-```
-
-Pipe in the custom list to Block List
+Network tests are marked ignored:
 
 ```shell
-cat someFile.txt | sudo block-list /etc/hosts
-```
-
-
-## Output
-
-If successful, this command will append a new list or replace the current list at the tail of the supplied hosts file, eg:
-
-```shell
-Block List updated! 🔒
-```
-
-```txt
-##
-# Host Database
-##
-127.0.0.1	localhost
-255.255.255.255	broadcasthost
-::1             localhost
-
-
-# Your list of addresses
-1.2.3.4 somehost
-
-... 
-
-# Block List
-
-0.0.0.0 some.custom.address.net
-0.0.0.0 another.custom.address.xyz
-
-0.0.0.0 some.malware.address.com
-0.0.0.0 another.blocked.address.xxx
+cargo test -- --ignored
 ```
