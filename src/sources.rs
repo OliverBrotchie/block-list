@@ -294,6 +294,15 @@ pub fn cached_counts(dir: &Path, id: &str) -> Option<Counts> {
     any.then_some(counts)
 }
 
+/// The section name a source gets in the hosts region.
+pub fn section_name(source: &str) -> String {
+    if catalog::get(source).is_some() {
+        source.to_string()
+    } else {
+        sanitize(source)
+    }
+}
+
 /// Where a source's cache entry lives. Catalog ids replace `/` with `-`.
 pub fn cache_path(dir: &Path, source: &str) -> PathBuf {
     let slug = if catalog::get(source).is_some() {
@@ -379,6 +388,17 @@ mod tests {
         assert_eq!(first, "list.hosts");
         assert!(second.starts_with("list.hosts-"));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn section_names_match_catalog_ids_and_paths() {
+        assert_eq!(section_name("stevenblack/hosts"), "stevenblack/hosts");
+        assert_eq!(section_name("blk/social"), "blk/social");
+        assert_eq!(
+            section_name("https://example.test/lists/ads.hosts?x=1"),
+            "ads.hosts"
+        );
+        assert_eq!(section_name("/tmp/my list.hosts"), "my-list.hosts");
     }
 
     #[test]

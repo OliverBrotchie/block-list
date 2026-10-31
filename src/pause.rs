@@ -129,8 +129,22 @@ pub fn now() -> u64 {
         .unwrap_or(0)
 }
 
-/// Seconds for durations such as `30m`, `2h`, or `1h30m`.
+/// Seconds for durations such as `30`, `30m`, `2h`, or `1h30m`.
+/// A bare number means minutes.
 pub fn parse_duration(text: &str) -> Result<u64, String> {
+    let text = text.trim();
+    if !text.is_empty() && text.chars().all(|c| c.is_ascii_digit()) {
+        let minutes: u64 = text
+            .parse()
+            .map_err(|_| format!("invalid duration: {text}"))?;
+        if minutes == 0 {
+            return Err(format!("invalid duration: {text}"));
+        }
+        return minutes
+            .checked_mul(60)
+            .ok_or_else(|| format!("duration is too large: {text}"));
+    }
+
     let mut total = 0u64;
     let mut number = String::new();
     let mut saw_unit = false;
@@ -244,7 +258,9 @@ mod tests {
         assert_eq!(parse_duration("2h").unwrap(), 7_200);
         assert_eq!(parse_duration("1h30m").unwrap(), 5_400);
         assert_eq!(parse_duration("45s").unwrap(), 45);
-        assert!(parse_duration("30").is_err());
+        assert_eq!(parse_duration("30").unwrap(), 1_800);
+        assert_eq!(parse_duration(" 45 ").unwrap(), 2_700);
+        assert!(parse_duration("0").is_err());
         assert!(parse_duration("30x").is_err());
         assert!(parse_duration("").is_err());
         assert!(parse_duration("18446744073709551615m").is_err());

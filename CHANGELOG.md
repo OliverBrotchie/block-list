@@ -19,6 +19,8 @@ Added:
 - Seven purpose lists with `blk lists` and `blk lists toggle <NAME>`, plus a menu manager for toggling, creating, editing, and deleting custom lists.
 - Curated inline sources `blk/streaming` and `blk/social`, and Blocklist Project sources for YouTube, piracy, and torrent.
 - A grouped TTY menu with a ColorfulTheme, one-line key hints, and a lock or unlock header.
+- Pause accepts a bare number as minutes, and the menu pause picker groups enabled lists separately from individual sources.
+- Menu screens clear between steps. Escape, blank input, and `c` cancel the current action without exiting.
 - Pause with a duration, foreground countdown, signal restore, and lazy expiry.
 - `status --json`, `test <domain>`, `doctor`, and a menu on a bare invocation.
 - Atomic hosts writes, a one-time `hosts.bak`, and a root check with a sudo hint.

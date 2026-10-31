@@ -85,6 +85,8 @@ sudo blk off                            # pause every source indefinitely
 sudo blk resume                         # restore now
 ```
 
+A bare number means minutes, so `blk pause 30` is the same as `blk pause 30m`. The menu pause picker groups enabled lists separately from individual sources and allows several selections.
+
 The pause holds the terminal and shows the time left. Expiry, Ctrl-C, SIGTERM, and closing the terminal all restore the previous region. Without a terminal, `pause` exits immediately and says nothing will restore it automatically. If the process is killed with SIGKILL, the record survives and the next command reports the live pause.
 
 ## Sources
