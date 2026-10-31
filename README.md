@@ -47,6 +47,15 @@ Running `blk` with no arguments on a terminal opens a grouped menu: Blocking, So
 | `blk catalog [SOURCE]` | list the built-in sources, or print one source's URLs |
 | `blk lists` | show the purpose lists and whether each is on |
 | `blk lists toggle <NAME>` | turn a purpose list on or off and apply it |
+| `blk completions <SHELL>` | print a completion script for bash, zsh, fish, elvish, or powershell |
+
+## Completions
+
+```shell
+blk completions zsh > "${fpath[1]}/_blk"
+blk completions bash > ~/.local/share/bash-completion/completions/blk
+blk completions fish > ~/.config/fish/completions/blk.fish
+```
 
 ## Options
 

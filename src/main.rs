@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use dialoguer::console::{style, Term};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
@@ -111,6 +111,11 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<ListsAction>,
     },
+    /// Print shell completions to stdout.
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -146,6 +151,10 @@ fn run(cli: &Cli) -> Result<()> {
         Some(Cmd::Rm { sources }) => rm_command(cli, &state, sources),
         Some(Cmd::Catalog { source }) => catalog_command(source.as_deref()),
         Some(Cmd::Lists { action }) => lists_command(cli, &state, action.as_ref()),
+        Some(Cmd::Completions { shell }) => {
+            completions_command(*shell);
+            Ok(())
+        }
         None => bare(cli, &state),
     }
 }
@@ -1613,6 +1622,11 @@ fn install_signal_handlers() {
         libc::signal(libc::SIGTERM, handler as libc::sighandler_t);
         libc::signal(libc::SIGHUP, handler as libc::sighandler_t);
     }
+}
+
+fn completions_command(shell: clap_complete::Shell) {
+    let mut command = Cli::command();
+    clap_complete::generate(shell, &mut command, "blk", &mut std::io::stdout());
 }
 
 fn catalog_command(id: Option<&str>) -> Result<()> {

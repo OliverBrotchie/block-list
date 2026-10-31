@@ -513,6 +513,18 @@ fn offline_url_source_reads_the_cache() {
 }
 
 #[test]
+fn completions_are_printed_for_each_shell() {
+    for shell in ["bash", "zsh", "fish"] {
+        let (dir, _hosts) = setup("completions", "127.0.0.1 localhost\n");
+        let out = run(&dir, &["completions", shell]);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{shell}: {stdout}");
+        assert!(stdout.contains("blk"), "{shell}: {stdout}");
+        assert!(!stdout.trim().is_empty(), "{shell}");
+    }
+}
+
+#[test]
 fn a_second_process_is_told_the_lock_is_held() {
     use std::os::unix::io::AsRawFd;
 

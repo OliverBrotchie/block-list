@@ -21,7 +21,8 @@ Added:
 - A grouped TTY menu with a ColorfulTheme, one-line key hints, and a lock or unlock header.
 - Pause accepts a bare number as minutes, and the menu pause picker groups enabled lists separately from individual sources.
 - Menu screens clear between steps. Escape, blank input, and `c` cancel the current action without exiting.
+- A state lock serialises writers. A second `blk` process reports that another process is running instead of racing.
 - Pause with a duration, foreground countdown, signal restore, and lazy expiry.
-- `status --json`, `test <domain>`, `doctor`, and a menu on a bare invocation.
+- `status --json`, `test <domain>`, `doctor`, `completions <shell>`, and a menu on a bare invocation.
 - Atomic hosts writes, a one-time `hosts.bak`, and a root check with a sudo hint.
 - Integration tests and CI on macOS and Ubuntu.
