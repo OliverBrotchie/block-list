@@ -221,7 +221,9 @@ pub fn save(dir: &Path, pause: &Pause, region: &str) -> Result<()> {
 }
 
 pub fn clear(dir: &Path) {
-    let _lock = crate::lock::Lock::acquire(dir).ok();
+    let Ok(_lock) = crate::lock::Lock::acquire(dir) else {
+        return;
+    };
     let _ = fs::remove_file(record_path(dir));
     let _ = fs::remove_file(snapshot_path(dir));
 }
