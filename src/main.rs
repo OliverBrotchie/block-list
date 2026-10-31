@@ -625,8 +625,10 @@ fn status_warnings(state: &Path, hosts: &hosts::Hosts) -> Result<Vec<String>> {
         warnings.push("pause-expired".to_string());
     }
     for source in config::load(state)?.sources {
-        if catalog::get(&source).is_some() && !sources::cache_path(state, &source).exists() {
-            warnings.push(format!("cache-missing:{source}"));
+        if let Some(entry) = catalog::get(&source) {
+            if !entry.is_inline() && !sources::cache_path(state, &source).exists() {
+                warnings.push(format!("cache-missing:{source}"));
+            }
         }
     }
     Ok(warnings)
@@ -712,6 +714,10 @@ fn doctor(cli: &Cli, state: &Path) -> Result<()> {
         let Some(entry) = catalog::get(&source) else {
             continue;
         };
+        if entry.is_inline() {
+            println!("cache: {source} inline, {} domains", entry.inline.len());
+            continue;
+        }
         let path = sources::cache_path(state, &source);
         if !path.exists() {
             problems += 1;
@@ -959,13 +965,28 @@ fn catalog_command(id: Option<&str>) -> Result<()> {
     match id {
         None => {
             for source in catalog::SOURCES {
-                let count = source.urls.len();
+                let count = if source.is_inline() {
+                    source.inline.len()
+                } else {
+                    source.urls.len()
+                };
+                let unit = if source.is_inline() {
+                    if count == 1 {
+                        "domain"
+                    } else {
+                        "domains"
+                    }
+                } else if count == 1 {
+                    "url"
+                } else {
+                    "urls"
+                };
                 println!(
-                    "{:<24} {:<9} {:>2} {:<4} {}",
+                    "{:<24} {:<9} {:>2} {:<7} {}",
                     source.id,
                     source.format.name(),
                     count,
-                    if count == 1 { "url" } else { "urls" },
+                    unit,
                     source.licence
                 );
             }
@@ -978,8 +999,14 @@ fn catalog_command(id: Option<&str>) -> Result<()> {
                 source.format.name(),
                 source.licence
             );
-            for url in source.urls {
-                println!("  {url}");
+            if source.is_inline() {
+                for domain in source.inline {
+                    println!("  {domain}");
+                }
+            } else {
+                for url in source.urls {
+                    println!("  {url}");
+                }
             }
         }
     }

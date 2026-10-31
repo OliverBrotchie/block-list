@@ -28,7 +28,80 @@ pub struct Source {
     pub format: Format,
     pub licence: &'static str,
     pub urls: &'static [&'static str],
+    /// Domains shipped in the binary. These sources never fetch or cache.
+    pub inline: &'static [&'static str],
 }
+
+impl Source {
+    pub fn is_inline(&self) -> bool {
+        !self.inline.is_empty()
+    }
+}
+
+/// Paid streaming services. YouTube comes from its own source.
+const STREAMING: &[&str] = &[
+    "netflix.com",
+    "nflxvideo.net",
+    "nflximg.net",
+    "nflxext.com",
+    "nflxso.net",
+    "primevideo.com",
+    "amazonvideo.com",
+    "aiv-cdn.net",
+    "aiv-delivery.net",
+    "disneyplus.com",
+    "disney-plus.net",
+    "bamgrid.com",
+    "dssott.com",
+    "hulu.com",
+    "huluim.com",
+    "max.com",
+    "hbomax.com",
+    "hbomaxcdn.com",
+    "tv.apple.com",
+    "play.itunes.apple.com",
+    "twitch.tv",
+    "ttvnw.net",
+    "jtvnw.net",
+    "crunchyroll.com",
+    "vrv.co",
+    "peacocktv.com",
+    "paramountplus.com",
+    "pluto.tv",
+];
+
+/// Social networks, with no WhatsApp domains.
+const SOCIAL: &[&str] = &[
+    "facebook.com",
+    "fb.com",
+    "fbcdn.net",
+    "fbsbx.com",
+    "messenger.com",
+    "instagram.com",
+    "cdninstagram.com",
+    "tiktok.com",
+    "tiktokcdn.com",
+    "tiktokv.com",
+    "byteoversea.com",
+    "twitter.com",
+    "x.com",
+    "t.co",
+    "twimg.com",
+    "snapchat.com",
+    "snap-cdn.net",
+    "sc-cdn.net",
+    "reddit.com",
+    "redd.it",
+    "redditstatic.com",
+    "redditmedia.com",
+    "linkedin.com",
+    "licdn.com",
+    "pinterest.com",
+    "pinimg.com",
+    "tumblr.com",
+    "threads.net",
+    "bsky.app",
+];
 
 const BRAVE_DEFAULT: &[&str] = &[
     "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt",
@@ -61,72 +134,119 @@ pub const SOURCES: &[Source] = &[
         format: Format::Abp,
         licence: "MPL-2.0 plus upstream terms",
         urls: BRAVE_DEFAULT,
+        inline: &[],
     },
     Source {
         id: "stevenblack/hosts",
         format: Format::Hosts,
         licence: "MIT",
         urls: &["https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"],
+        inline: &[],
     },
     Source {
         id: "stevenblack/social",
         format: Format::Hosts,
         licence: "MIT",
         urls: &["https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts"],
+        inline: &[],
     },
     Source {
         id: "stevenblack/gambling",
         format: Format::Hosts,
         licence: "MIT",
         urls: &["https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts"],
+        inline: &[],
     },
     Source {
         id: "stevenblack/porn",
         format: Format::Hosts,
         licence: "MIT",
         urls: &["https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts"],
+        inline: &[],
     },
     Source {
         id: "oisd/small",
         format: Format::Wildcard,
         licence: "GPL-3.0",
         urls: &["https://small.oisd.nl/domainswild"],
+        inline: &[],
     },
     Source {
         id: "oisd/big",
         format: Format::Wildcard,
         licence: "GPL-3.0",
         urls: &["https://big.oisd.nl/domainswild"],
+        inline: &[],
     },
     Source {
         id: "hagezi/normal",
         format: Format::Domains,
         licence: "GPL-3.0",
         urls: &["https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt"],
+        inline: &[],
     },
     Source {
         id: "hagezi/pro",
         format: Format::Domains,
         licence: "GPL-3.0",
         urls: &["https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt"],
+        inline: &[],
     },
     Source {
         id: "1hosts/lite",
         format: Format::Hosts,
         licence: "MPL-2.0",
         urls: &["https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/hosts.txt"],
+        inline: &[],
     },
     Source {
         id: "peterlowe/hosts",
         format: Format::Hosts,
         licence: "unstated",
         urls: &["https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext"],
+        inline: &[],
     },
     Source {
         id: "malwarefilter/urlhaus",
         format: Format::Hosts,
         licence: "CC0 and MIT",
         urls: &["https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-hosts-online.txt"],
+        inline: &[],
+    },
+    Source {
+        id: "blocklistproject/youtube",
+        format: Format::Hosts,
+        licence: "Unlicense",
+        urls: &["https://blocklistproject.github.io/Lists/youtube.txt"],
+        inline: &[],
+    },
+    Source {
+        id: "blocklistproject/piracy",
+        format: Format::Hosts,
+        licence: "Unlicense",
+        urls: &["https://blocklistproject.github.io/Lists/piracy.txt"],
+        inline: &[],
+    },
+    Source {
+        id: "blocklistproject/torrent",
+        format: Format::Hosts,
+        licence: "Unlicense",
+        urls: &["https://blocklistproject.github.io/Lists/torrent.txt"],
+        inline: &[],
+    },
+    Source {
+        id: "blk/streaming",
+        format: Format::Domains,
+        licence: "curated, MIT",
+        urls: &[],
+        inline: STREAMING,
+    },
+    Source {
+        id: "blk/social",
+        format: Format::Domains,
+        licence: "curated, MIT",
+        urls: &[],
+        inline: SOCIAL,
     },
 ];
 
@@ -273,11 +393,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_ids_are_unique_and_have_urls() {
+    fn catalog_ids_are_unique_and_have_a_source() {
         let mut seen = HashSet::new();
         for source in SOURCES {
             assert!(seen.insert(source.id), "duplicate id {}", source.id);
-            assert!(!source.urls.is_empty(), "{} has no urls", source.id);
+            if source.is_inline() {
+                assert!(source.urls.is_empty(), "{} has urls", source.id);
+                for domain in source.inline {
+                    assert!(region::valid_host(domain), "invalid domain {domain}");
+                }
+            } else {
+                assert!(!source.urls.is_empty(), "{} has no urls", source.id);
+            }
         }
     }
 

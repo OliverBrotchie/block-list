@@ -480,6 +480,54 @@ fn offline_url_source_reads_the_cache() {
 }
 
 #[test]
+fn offline_update_of_an_inline_source_writes_no_cache() {
+    let (dir, hosts) = setup("inline", "127.0.0.1 localhost\n");
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "--offline",
+            "update",
+            "blk/social",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = fs::read_to_string(&hosts).unwrap();
+    assert!(text.contains("# list: blk/social"));
+    assert!(text.contains("0.0.0.0 facebook.com"));
+    assert!(!text.to_lowercase().contains("whatsapp"));
+    assert!(!dir.path().join("state").join("cache").exists());
+    let config = fs::read_to_string(dir.path().join("state").join("config.toml")).unwrap();
+    assert!(config.contains("blk/social"));
+}
+
+#[test]
+fn doctor_accepts_inline_sources_without_a_cache() {
+    let (dir, hosts) = setup("inline-doctor", "127.0.0.1 localhost\n");
+    let update = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "--offline",
+            "update",
+            "blk/streaming",
+        ],
+    );
+    assert!(update.status.success());
+    let out = run(&dir, &["--hosts", hosts.to_str().unwrap(), "doctor"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("inline"), "stdout: {stdout}");
+    assert!(!stdout.contains("cache: missing"), "stdout: {stdout}");
+}
+
+#[test]
 fn dry_run_writes_no_cache_or_config() {
     let (dir, hosts) = setup("dry-cache", "127.0.0.1 localhost\n");
     let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");

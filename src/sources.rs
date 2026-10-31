@@ -100,6 +100,16 @@ fn load_catalog(
     let mut fetched = false;
     let mut warnings = Vec::new();
 
+    for domain in entry.inline {
+        let entry = Entry {
+            ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            host: domain.to_string(),
+        };
+        if seen.insert((entry.ip, entry.host.clone())) {
+            entries.push(entry);
+        }
+    }
+
     for (index, url) in entry.urls.iter().enumerate() {
         let path = if entry.urls.len() == 1 {
             root.clone()
@@ -359,6 +369,22 @@ mod tests {
         assert_eq!(first, "list.hosts");
         assert!(second.starts_with("list.hosts-"));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn inline_source_loads_without_cache() {
+        let dir = temp_dir("inline");
+        let loaded = load_all(&dir, &["blk/social".to_string()], true, false).unwrap();
+        assert!(loaded[0]
+            .entries
+            .iter()
+            .any(|entry| entry.host == "facebook.com"));
+        assert!(!loaded[0]
+            .entries
+            .iter()
+            .any(|entry| entry.host.contains("whatsapp")));
+        assert!(!dir.join("cache").exists());
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
