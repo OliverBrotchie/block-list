@@ -5,6 +5,7 @@ mod pause;
 mod region;
 mod sources;
 mod state;
+mod timefmt;
 
 use std::fs;
 use std::io::IsTerminal;
@@ -238,9 +239,7 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
 /// Fetch or read every source, then replace the region in one write.
 fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<()> {
     if sources.is_empty() {
-        return Err(Error::msg(
-            "no sources configured; run `blk sources` or `blk add`",
-        ));
+        return Err(Error::NoSourcesConfigured);
     }
 
     let contents = read_hosts(&cli.hosts)?;
@@ -395,7 +394,9 @@ fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
     let config = config::load(state)?;
     for source in sources {
         if !config.sources.contains(source) {
-            return Err(Error::msg(format!("{source} is not configured")));
+            return Err(Error::SourceNotConfigured {
+                source: source.clone(),
+            });
         }
     }
     let remaining = config
@@ -460,10 +461,10 @@ fn validate_source(source: &str) -> Result<()> {
     {
         return Ok(());
     }
-    Err(Error::msg(format!(
-        "unknown source {source}; known ids: {}",
-        catalog::ids().join(", ")
-    )))
+    Err(Error::unknown_source(
+        source,
+        catalog::ids().iter().map(|id| id.to_string()).collect(),
+    ))
 }
 
 fn dedupe(sources: Vec<String>) -> Vec<String> {
@@ -505,7 +506,10 @@ fn status(cli: &Cli, state: &Path, json: bool) -> Result<()> {
 
     if let Some(update) = state::load(state)? {
         if !cli.quiet {
-            println!("last update: {}", local_datetime(update.last_update));
+            println!(
+                "last update: {}",
+                timefmt::local_datetime(update.last_update)
+            );
         }
     }
 
@@ -543,7 +547,7 @@ fn status(cli: &Cli, state: &Path, json: bool) -> Result<()> {
     if let Some(record) = record {
         if !cli.quiet {
             let names = record.paused.join(", ");
-            println!("paused: {names} {}", describe(&record));
+            println!("paused: {names} {}", record.describe());
         }
     }
     Ok(())
@@ -566,7 +570,7 @@ fn status_json(
         })
         .unwrap_or_default();
     let total: usize = sources.iter().map(|(_, count)| count).sum();
-    let last = state::load(state)?.map(|update| local_datetime(update.last_update));
+    let last = state::load(state)?.map(|update| timefmt::local_datetime(update.last_update));
     let warnings = status_warnings(state, contents, parsed)?;
 
     let pause_json = match record {
@@ -580,7 +584,7 @@ fn status_json(
                 .collect::<Vec<_>>()
                 .join(","),
             match record.until {
-                Some(until) => json_string(&local_datetime(until)),
+                Some(until) => json_string(&timefmt::local_datetime(until)),
                 None => "null".to_string(),
             }
         ),
@@ -770,7 +774,7 @@ fn doctor(cli: &Cli, state: &Path) -> Result<()> {
     }
 
     if problems > 0 {
-        Err(Error::msg(format!("doctor found {problems} problems")))
+        Err(Error::DoctorProblems { count: problems })
     } else {
         println!("doctor: ok");
         Ok(())
@@ -816,7 +820,7 @@ fn config_command(state: &Path) -> Result<()> {
         .status()
         .map_err(|err| Error::io("start", editor.clone(), err))?;
     if !status.success() {
-        return Err(Error::msg("editor exited with an error"));
+        return Err(Error::EditorFailed);
     }
     Ok(())
 }
@@ -827,10 +831,7 @@ fn off(cli: &Cli, state: &Path) -> Result<()> {
     }
     if let Some(record) = pause::load(state)? {
         if !(cli.dry_run && record.is_expired(pause::now())) {
-            return Err(Error::msg(format!(
-                "already paused ({}); run blk resume first",
-                describe(&record)
-            )));
+            return Err(Error::AlreadyPaused(record));
         }
     }
 
@@ -882,19 +883,15 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
     }
     if let Some(record) = pause::load(state)? {
         if !(cli.dry_run && record.is_expired(pause::now())) {
-            return Err(Error::msg(format!(
-                "already paused ({}); run blk resume first",
-                describe(&record)
-            )));
+            return Err(Error::AlreadyPaused(record));
         }
     }
 
     let contents = read_hosts(&cli.hosts)?;
     let Some(parsed) = region::parse(&contents)? else {
-        return Err(Error::msg(format!(
-            "{} has no block region to pause",
-            cli.hosts.display()
-        )));
+        return Err(Error::NoBlockRegion {
+            hosts: cli.hosts.clone(),
+        });
     };
 
     let known: Vec<String> = parsed
@@ -909,10 +906,10 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
     };
     for target in &targets {
         if !known.contains(target) {
-            return Err(Error::msg(format!(
-                "unknown source {target}; known sources: {}",
-                known.join(", ")
-            )));
+            return Err(Error::UnknownSource {
+                source: target.clone(),
+                known: known.clone(),
+            });
         }
     }
 
@@ -935,7 +932,7 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
             println!(
                 "would pause {} {}",
                 record.paused.join(", "),
-                describe(&record)
+                record.describe()
             );
         }
         return Ok(());
@@ -951,7 +948,7 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
     }
 
     if !cli.quiet {
-        println!("paused {} {}", record.paused.join(", "), describe(&record));
+        println!("paused {} {}", record.paused.join(", "), record.describe());
     }
     hold(state, &record)
 }
@@ -1004,7 +1001,7 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
         let minutes = (until - now).div_ceil(60);
         if minutes != shown {
             shown = minutes;
-            println!("{minutes}m left, until {}", hhmm(until));
+            println!("{minutes}m left, until {}", timefmt::local_hhmm(until));
         }
         std::thread::sleep(Duration::from_secs(1));
     }
@@ -1022,10 +1019,9 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
 fn resume_from(state: &Path, record: &pause::Pause) -> Result<()> {
     let hosts = &record.hosts_path;
     let Some(snapshot) = pause::load_snapshot(state) else {
-        return Err(Error::msg(format!(
-            "the saved region for {} is missing; run `blk update` to rebuild it",
-            hosts.display()
-        )));
+        return Err(Error::MissingSnapshot {
+            hosts: hosts.clone(),
+        });
     };
     let contents = read_hosts(hosts)?;
     let parsed = region::parse(&contents)?;
@@ -1071,51 +1067,6 @@ fn split_args(args: &[String]) -> (Vec<String>, Option<u64>) {
         }
     }
     (sources, until)
-}
-
-fn describe(record: &pause::Pause) -> String {
-    match record.until {
-        Some(until) => {
-            let left = until.saturating_sub(pause::now());
-            format!("until {} ({} left)", hhmm(until), human(left))
-        }
-        None => "indefinitely".to_string(),
-    }
-}
-
-fn human(seconds: u64) -> String {
-    let minutes = seconds.div_ceil(60);
-    if minutes >= 60 {
-        format!("{}h{}m", minutes / 60, minutes % 60)
-    } else {
-        format!("{minutes}m")
-    }
-}
-
-fn hhmm(epoch: u64) -> String {
-    let local = local_time(epoch);
-    format!("{:02}:{:02}", local.tm_hour, local.tm_min)
-}
-
-fn local_datetime(epoch: u64) -> String {
-    let local = local_time(epoch);
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        local.tm_year + 1900,
-        local.tm_mon + 1,
-        local.tm_mday,
-        local.tm_hour,
-        local.tm_min
-    )
-}
-
-fn local_time(epoch: u64) -> libc::tm {
-    let time = epoch as libc::time_t;
-    let mut local: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe {
-        libc::localtime_r(&time, &mut local);
-    }
-    local
 }
 
 extern "C" fn handle_signal(_: libc::c_int) {
@@ -1176,10 +1127,9 @@ fn require_root(hosts: &Path) -> Result<()> {
     if can_write() {
         return Ok(());
     }
-    Err(Error::msg(format!(
-        "writing {} requires root; run with sudo",
-        hosts.display()
-    )))
+    Err(Error::RootRequired {
+        hosts: hosts.to_path_buf(),
+    })
 }
 
 fn state_dir() -> PathBuf {
@@ -1203,10 +1153,9 @@ fn backup(hosts: &Path) -> Result<()> {
 fn write_hosts(path: &Path, contents: &str) -> Result<()> {
     region::write_atomic(path, contents).map_err(|err| {
         if err.kind() == std::io::ErrorKind::PermissionDenied {
-            Error::msg(format!(
-                "permission denied writing {}; run with sudo",
-                path.display()
-            ))
+            Error::PermissionDenied {
+                path: path.to_path_buf(),
+            }
         } else {
             Error::io("write", path.display().to_string(), err)
         }

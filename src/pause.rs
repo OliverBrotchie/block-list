@@ -18,6 +18,18 @@ impl Pause {
     pub fn is_expired(&self, now: u64) -> bool {
         self.until.is_some_and(|until| now >= until)
     }
+
+    /// `until 14:30 (12m left)` or `indefinitely`.
+    pub fn describe(&self) -> String {
+        match self.until {
+            Some(until) => format!(
+                "until {} ({} left)",
+                crate::timefmt::local_hhmm(until),
+                crate::timefmt::human_duration(until.saturating_sub(now()))
+            ),
+            None => "indefinitely".to_string(),
+        }
+    }
 }
 
 pub fn now() -> u64 {

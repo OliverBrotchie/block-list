@@ -55,10 +55,10 @@ fn load(
     }
 
     if !is_url(source) && !Path::new(source).exists() {
-        return Err(Error::msg(format!(
-            "unknown source {source}; known ids: {}",
-            catalog::ids().join(", ")
-        )));
+        return Err(Error::unknown_source(
+            source,
+            catalog::ids().iter().map(|id| id.to_string()).collect(),
+        ));
     }
 
     let name = unique_name(sanitize(source), source, used);
@@ -72,7 +72,9 @@ fn load(
     };
     let (entries, warnings) = region::entries_from_hosts(&text);
     if entries.is_empty() {
-        return Err(Error::msg(format!("{source} contains no usable entries")));
+        return Err(Error::EmptySource {
+            source: source.to_string(),
+        });
     }
     Ok(Loaded {
         name,
@@ -115,7 +117,9 @@ fn load_catalog(
                         warnings.push(format!("{url} contains no usable entries"));
                         continue;
                     }
-                    return Err(Error::msg(format!("{url} contains no usable entries")));
+                    return Err(Error::EmptySource {
+                        source: url.to_string(),
+                    });
                 }
                 merge(&mut entries, &mut seen, parsed);
             }
@@ -126,7 +130,9 @@ fn load_catalog(
                         warnings.push(format!("{url} yielded no domains"));
                         continue;
                     }
-                    return Err(Error::msg(format!("{url} yielded no domains")));
+                    return Err(Error::NoDomains {
+                        url: url.to_string(),
+                    });
                 }
                 if entry.format == Format::Abp {
                     abp = true;
@@ -172,10 +178,8 @@ fn fetch_or_cache(
     write_cache: bool,
 ) -> Result<(String, bool)> {
     if offline {
-        let body = fs::read_to_string(path).map_err(|_| {
-            Error::msg(format!(
-                "no cached copy of {url}; run an online update first"
-            ))
+        let body = fs::read_to_string(path).map_err(|_| Error::NoCachedCopy {
+            url: url.to_string(),
         })?;
         return Ok((body, false));
     }
@@ -188,8 +192,9 @@ fn fetch_or_cache(
 
     match request.call() {
         Ok(response) if response.status() == 304 => {
-            let body = fs::read_to_string(path)
-                .map_err(|_| Error::msg(format!("{url} returned 304 but nothing is cached")))?;
+            let body = fs::read_to_string(path).map_err(|_| Error::EmptyCacheResponse {
+                url: url.to_string(),
+            })?;
             Ok((body, false))
         }
         Ok(response) => {
@@ -218,8 +223,9 @@ fn fetch_or_cache(
             Ok((body, true))
         }
         Err(ureq::Error::Status(304, _)) => {
-            let body = fs::read_to_string(path)
-                .map_err(|_| Error::msg(format!("{url} returned 304 but nothing is cached")))?;
+            let body = fs::read_to_string(path).map_err(|_| Error::EmptyCacheResponse {
+                url: url.to_string(),
+            })?;
             Ok((body, false))
         }
         Err(error) => Err(Error::fetch(url, error)),

@@ -139,12 +139,8 @@ pub fn ids() -> Vec<&'static str> {
 }
 
 pub fn get_or_error(id: &str) -> Result<&'static Source> {
-    get(id).ok_or_else(|| {
-        Error::msg(format!(
-            "unknown source {id}; known sources: {}",
-            ids().join(", ")
-        ))
-    })
+    get(id)
+        .ok_or_else(|| Error::unknown_source(id, ids().iter().map(|id| id.to_string()).collect()))
 }
 
 #[derive(Debug, Default)]
