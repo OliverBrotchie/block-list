@@ -148,7 +148,11 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
-            Error::DoctorProblems { count } => write!(f, "doctor found {count} problems"),
+            Error::DoctorProblems { count } => write!(
+                f,
+                "doctor found {count} problem{}",
+                if *count == 1 { "" } else { "s" }
+            ),
             Error::EditorFailed => f.write_str("editor exited with an error"),
             Error::NoCachedCopy { url } => {
                 write!(f, "no cached copy of {url}; run an online update first")
@@ -308,6 +312,18 @@ mod tests {
         assert!(text.starts_with("already paused until "), "{text}");
         assert!(text.contains("left"), "{text}");
         assert!(!text.contains("(("), "{text}");
+    }
+
+    #[test]
+    fn doctor_problems_agree_in_number() {
+        assert_eq!(
+            Error::DoctorProblems { count: 1 }.to_string(),
+            "doctor found 1 problem"
+        );
+        assert_eq!(
+            Error::DoctorProblems { count: 2 }.to_string(),
+            "doctor found 2 problems"
+        );
     }
 
     #[test]
