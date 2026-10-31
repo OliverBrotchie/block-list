@@ -1136,8 +1136,17 @@ fn status(cli: &Cli, state: &Path, json: bool) -> Result<()> {
 
     if let Some(record) = record {
         if !cli.quiet {
-            let names = record.paused.join(", ");
-            println!("paused: {names} {}", record.describe());
+            let when = record.describe();
+            match record.paused.len() {
+                0 => println!("paused: all sources {when}"),
+                1 => println!("paused: {} {when}", record.paused[0]),
+                count => {
+                    println!("paused: {count} sources {when}");
+                    for source in &record.paused {
+                        println!("  {source}");
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -1417,7 +1426,8 @@ fn off(cli: &Cli, state: &Path) -> Result<()> {
     let record = pause::Pause::plan(&cli.hosts, parsed, &[], None)?;
     pause::begin(state, &hosts, &record)?;
     if !cli.quiet {
-        println!("Block List paused (off). Run `blk resume` to restore it.");
+        print_pause(&record, "Paused");
+        println!("Run `blk resume` to restore.");
     }
     Ok(())
 }
@@ -1444,11 +1454,7 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
 
     if cli.dry_run {
         if !cli.quiet {
-            println!(
-                "would pause {} {}",
-                record.paused.join(", "),
-                record.describe()
-            );
+            print_pause(&record, "Would pause");
         }
         return Ok(());
     }
@@ -1456,9 +1462,31 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
     pause::begin(state, &hosts, &record)?;
 
     if !cli.quiet {
-        println!("paused {} {}", record.paused.join(", "), record.describe());
+        print_pause(&record, "Paused");
     }
     hold(state, &record)
+}
+
+fn print_pause(record: &pause::Pause, verb: &str) {
+    let count = record.paused.len();
+    let when = match record.until {
+        Some(until) => format!(
+            "until {} ({} left)",
+            timefmt::local_hhmm(until),
+            timefmt::human_duration(until.saturating_sub(pause::now()))
+        ),
+        None => "indefinitely".to_string(),
+    };
+    match count {
+        0 => println!("{verb} all sources {when}"),
+        1 => println!("{verb} {} {when}", record.paused[0]),
+        _ => {
+            println!("{verb} {count} sources {when}:");
+            for source in &record.paused {
+                println!("  {source}");
+            }
+        }
+    }
 }
 
 fn resume(cli: &Cli, state: &Path) -> Result<()> {
@@ -1477,23 +1505,27 @@ fn resume(cli: &Cli, state: &Path) -> Result<()> {
         return Ok(());
     }
     pause::resume(state, &record)?;
-    println!("Block List resumed");
+    println!("Resumed.");
     Ok(())
 }
 
 /// Wait out a pause in the foreground, or report that nobody will restore it.
 fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
     if !std::io::stdin().is_terminal() {
-        println!("nothing will restore this pause automatically; run `blk resume`");
+        println!("Nothing will restore this pause automatically; run `blk resume`.");
         return Ok(());
     }
 
     install_signal_handlers();
-    if record.until.is_none() {
-        println!("Ctrl-C, closing the terminal, or `blk resume` restores the region");
-    }
+    let hint = match record.until {
+        None => "Press Ctrl-C or close the terminal to restore.",
+        Some(_) => "Press Ctrl-C to restore.",
+    };
+    println!("{}", style(hint).dim());
 
-    let mut shown = u64::MAX;
+    let mut shown = record
+        .until
+        .map(|until| until.saturating_sub(pause::now()).div_ceil(60));
     loop {
         if INTERRUPTED.load(Ordering::SeqCst) {
             break;
@@ -1507,19 +1539,20 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
             break;
         }
         let minutes = (until - now).div_ceil(60);
-        if minutes != shown {
-            shown = minutes;
-            println!("{minutes}m left, until {}", timefmt::local_hhmm(until));
+        if Some(minutes) != shown {
+            shown = Some(minutes);
+            let left = timefmt::human_duration(until - now);
+            println!("{left} left");
         }
         std::thread::sleep(Duration::from_secs(1));
     }
 
     if pause::load(state)?.is_none() {
-        println!("pause was already resumed elsewhere");
+        println!("Pause was already resumed elsewhere.");
         return Ok(());
     }
     pause::resume(state, record)?;
-    println!("Block List resumed");
+    println!("Resumed.");
     Ok(())
 }
 
@@ -1527,7 +1560,7 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
 fn end_expired_pause(state: &Path) -> Result<()> {
     match pause::expire(state)? {
         pause::Expiry::None => {}
-        pause::Expiry::Resumed => println!("pause expired; region restored"),
+        pause::Expiry::Resumed => println!("Pause expired; region restored."),
         pause::Expiry::NeedsRoot => {
             eprintln!("warning: pause expired; run sudo blk resume");
         }

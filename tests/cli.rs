@@ -205,7 +205,7 @@ fn pause_one_source_keeps_the_other_and_resume_restores_bytes() {
     let paused = fs::read_to_string(&hosts).unwrap();
     assert!(!paused.contains("ads.example"));
     assert!(paused.contains("tracker.example"));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("nothing will restore"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Nothing will restore"));
 
     assert!(run(&dir, &["resume"]).status.success());
     assert_eq!(fs::read_to_string(&hosts).unwrap(), before);
@@ -300,7 +300,7 @@ fn an_expired_pause_is_restored_by_the_next_command() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("pause expired"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Pause expired"));
     assert_eq!(fs::read_to_string(&hosts).unwrap(), before);
 }
 
