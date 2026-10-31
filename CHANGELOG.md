@@ -16,6 +16,9 @@ Added:
 - Hosts, plain domain, wildcard domain, and strict ABP parsers.
 - Conditional GET with ETag caches, `--offline` rebuilds, and `--dry-run`.
 - Interactive source selection, `add`, and `rm`.
+- Seven purpose lists with `blk lists` and `blk lists toggle <NAME>`, plus a menu manager for toggling, creating, editing, and deleting custom lists.
+- Curated inline sources `blk/streaming` and `blk/social`, and Blocklist Project sources for YouTube, piracy, and torrent.
+- A grouped TTY menu with a ColorfulTheme, one-line key hints, and a lock or unlock header.
 - Pause with a duration, foreground countdown, signal restore, and lazy expiry.
 - `status --json`, `test <domain>`, `doctor`, and a menu on a bare invocation.
 - Atomic hosts writes, a one-time `hosts.bak`, and a root check with a sudo hint.

@@ -5,6 +5,7 @@ A hosts-based block list manager for macOS and Linux. `blk` keeps one managed re
 - Blocking applies to every program that uses the system resolver.
 - The managed region is visible in the file, between `# BEGIN blk` and `# END blk`.
 - Lists refresh with conditional requests, so a daily run downloads nothing when nothing changed.
+- Purpose lists bundle sources for social media, streaming, piracy, gambling, adult content, malware, and ads.
 - Pausing restores the exact previous region on expiry, Ctrl-C, or terminal close.
 
 ## Install
@@ -19,12 +20,14 @@ The package is `block-list` and the binary is `blk`.
 
 ```shell
 sudo blk sources      # choose providers interactively
+blk lists             # show purpose lists and their state
+sudo blk lists toggle "Social media"
 sudo blk update       # fetch and write /etc/hosts
 blk status            # show what is active
 sudo blk doctor       # check the file, cache, backup, and drift
 ```
 
-Running `blk` with no arguments on a terminal opens a menu with the same actions.
+Running `blk` with no arguments on a terminal opens a grouped menu: Blocking, Sources, Lists, Tools, and Quit. Each screen prints a one-line key hint, and the header shows a lock or unlock glyph for the current state.
 
 ## Commands
 
@@ -42,6 +45,8 @@ Running `blk` with no arguments on a terminal opens a menu with the same actions
 | `blk doctor` | check markers, cache, backup, and drift; exit 1 on problems |
 | `blk config` | open the config file in `$EDITOR` |
 | `blk catalog [SOURCE]` | list the built-in sources, or print one source's URLs |
+| `blk lists` | show the purpose lists and whether each is on |
+| `blk lists toggle <NAME>` | turn a purpose list on or off and apply it |
 
 ## Options
 
@@ -52,6 +57,24 @@ Running `blk` with no arguments on a terminal opens a menu with the same actions
 | `--dry-run` | print what would change, write nothing |
 | `--yes` | skip the confirmation prompt |
 | `--quiet` | suppress normal output |
+
+## Purpose lists
+
+A list is a named bundle of sources. Turning one on adds every member source. Turning one off removes them. A list is on when all its members are configured.
+
+| list | sources |
+| --- | --- |
+| Ads and trackers | `stevenblack/hosts`, `1hosts/lite` |
+| Social media | `blk/social` |
+| Media streaming | `blk/streaming`, `blocklistproject/youtube` |
+| Anime and piracy | `blocklistproject/piracy`, `blocklistproject/torrent` |
+| Gambling | `stevenblack/gambling` |
+| Adult content | `stevenblack/porn` |
+| Malware and phishing | `malwarefilter/urlhaus`, `hagezi/pro` |
+
+`blk/social` and `blk/streaming` are curated domain lists shipped with the binary. They work offline, need no cache, and change only with a new release. The social list contains no WhatsApp domains. Streaming lists block the services themselves, not just their ads, so use them when you want whole-service blocking.
+
+Turning a list off keeps a source that another fully enabled list still needs. Editing an enabled custom list follows the same rule. Preset names are reserved and presets are immutable. Create, edit, and delete custom lists in the menu: run `blk`, choose Lists. Deleting a list keeps its sources configured.
 
 ## Pausing
 
@@ -66,16 +89,18 @@ The pause holds the terminal and shows the time left. Expiry, Ctrl-C, SIGTERM, a
 
 ## Sources
 
-`blk catalog` prints each source with its format, URL count, and licence. The first few:
+`blk catalog` prints each source with its format, URL or domain count, and licence. The first few:
 
 ```
-brave/default            abp       22 urls  MPL-2.0 plus upstream terms
-stevenblack/hosts        hosts      1 url   MIT
-stevenblack/social       hosts      1 url   MIT
-oisd/small               wildcard   1 url   GPL-3.0
-hagezi/normal            domains    1 url   GPL-3.0
-1hosts/lite              hosts      1 url   MPL-2.0
+brave/default            abp       22 urls    MPL-2.0 plus upstream terms
+stevenblack/hosts        hosts      1 url     MIT
+stevenblack/social       hosts      1 url     MIT
+blocklistproject/youtube hosts      1 url     Unlicense
+blk/streaming            domains   28 domains curated, MIT
+blk/social               domains   29 domains curated, MIT
 ```
+
+Some sources ship inside the binary as curated domain lists. They need no network and no cache, and `doctor` reports them as inline.
 
 Add a URL or a local list with `blk add`, or append it with `blk update --from`. Both save the source:
 
@@ -96,7 +121,7 @@ The conversion is approximate. A hosts file cannot express exceptions, paths, op
 
 | file | contents |
 | --- | --- |
-| `config.toml` | the ordered source list |
+| `config.toml` | the ordered source list and custom purpose lists |
 | `state.toml` | last update, region hash, per-source counts |
 | `pause.toml` | the current pause record |
 | `pause.region` | the region as it was when the pause started |
@@ -125,6 +150,7 @@ Only the region is rewritten. Anything before or after it stays as it was. Write
 - A hosts entry blocks one exact hostname. Subdomains are blocked only when the list includes them. ABP's `||example.com^` covers subdomains, which a hosts file cannot.
 - ABP conversion is lossy for the reasons above. Brave's bundle is mostly cosmetic and path rules, so only part of it becomes hosts entries.
 - A legacy `# Block List` section from version 1 is never read, migrated, or removed. Remove it by hand after upgrading.
+- The curated `blk/streaming` and `blk/social` lists only change with a release. They are not refreshed by `blk update`.
 
 ## Scheduled updates
 

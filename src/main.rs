@@ -155,7 +155,7 @@ fn bare(cli: &Cli, state: &Path) -> Result<()> {
     }
     status(cli, state, false)?;
     eprintln!(
-        "usage: blk <status|update|sources|add|rm|pause|resume|off|test|doctor|config|catalog>"
+        "usage: blk <status|update|sources|add|rm|pause|resume|off|test|doctor|config|catalog|lists>"
     );
     std::process::exit(2);
 }
