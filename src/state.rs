@@ -26,6 +26,7 @@ pub fn load(dir: &Path) -> Result<Option<State>> {
 }
 
 pub fn save(dir: &Path, state: &State) -> Result<()> {
+    let _lock = crate::lock::Lock::acquire(dir)?;
     fs::create_dir_all(dir).map_err(|err| Error::io("create", dir.display().to_string(), err))?;
     let path = path(dir);
     let text = toml::to_string(state)

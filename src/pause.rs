@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::hosts::{self, Hosts};
+use crate::lock::Lock;
 use crate::region::{self, Section};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -80,6 +81,7 @@ pub fn begin(state: &Path, hosts: &Hosts, record: &Pause) -> Result<()> {
         .cloned()
         .collect();
     hosts::require_root(&record.hosts_path)?;
+    let _lock = Lock::acquire(state)?;
     save(state, record, snapshot)?;
     if let Err(err) = hosts.commit(state, &region::render(&kept)) {
         clear(state);
@@ -90,6 +92,8 @@ pub fn begin(state: &Path, hosts: &Hosts, record: &Pause) -> Result<()> {
 
 /// Restore the exact region saved at pause time.
 pub fn resume(state: &Path, record: &Pause) -> Result<()> {
+    hosts::require_root(&record.hosts_path)?;
+    let _lock = Lock::acquire(state)?;
     let Some(snapshot) = load_snapshot(state) else {
         return Err(Error::MissingSnapshot {
             hosts: record.hosts_path.clone(),
@@ -204,6 +208,7 @@ pub fn load_snapshot(dir: &Path) -> Option<String> {
 }
 
 pub fn save(dir: &Path, pause: &Pause, region: &str) -> Result<()> {
+    let _lock = crate::lock::Lock::acquire(dir)?;
     fs::create_dir_all(dir).map_err(|err| Error::io("create", dir.display().to_string(), err))?;
     let path = record_path(dir);
     let text = toml::to_string(pause)
@@ -216,6 +221,7 @@ pub fn save(dir: &Path, pause: &Pause, region: &str) -> Result<()> {
 }
 
 pub fn clear(dir: &Path) {
+    let _lock = crate::lock::Lock::acquire(dir).ok();
     let _ = fs::remove_file(record_path(dir));
     let _ = fs::remove_file(snapshot_path(dir));
 }

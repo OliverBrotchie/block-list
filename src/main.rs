@@ -3,6 +3,7 @@ mod config;
 mod error;
 mod hosts;
 mod lists;
+mod lock;
 mod pause;
 mod region;
 mod sources;
@@ -854,6 +855,8 @@ fn apply(
         }
     }
 
+    hosts::require_root(&cli.hosts)?;
+    let _lock = lock::Lock::acquire(state)?;
     hosts.commit(state, &rendered)?;
 
     state::save(
@@ -1027,6 +1030,7 @@ fn change_sources(
     }
 
     if sources.is_empty() {
+        let _lock = lock::Lock::acquire(state)?;
         clear_region(cli, state)?;
         config::save(state, &next)?;
         if !cli.quiet {

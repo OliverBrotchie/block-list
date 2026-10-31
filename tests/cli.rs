@@ -513,6 +513,54 @@ fn offline_url_source_reads_the_cache() {
 }
 
 #[test]
+fn a_second_process_is_told_the_lock_is_held() {
+    use std::os::unix::io::AsRawFd;
+
+    let (dir, hosts) = setup("lock", "127.0.0.1 localhost\n");
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    let state = dir.path().join("state");
+    fs::create_dir_all(&state).unwrap();
+    let lock = state.join("lock");
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock)
+        .unwrap();
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    assert_eq!(rc, 0);
+
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap(),
+        ],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("another blk process"));
+    drop(file);
+
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn lists_show_and_toggle_a_preset() {
     let (dir, hosts) = setup("lists", "127.0.0.1 localhost\n");
     let out = run(&dir, &["--hosts", hosts.to_str().unwrap(), "lists"]);

@@ -26,6 +26,8 @@ pub enum Error {
     ListEmpty,
     /// A list needs a name.
     EmptyListName,
+    /// Another blk process holds the state lock.
+    Busy,
     /// A pause is already running.
     AlreadyPaused(crate::pause::Pause),
     /// `pause` found no block region in the hosts file.
@@ -134,6 +136,7 @@ impl fmt::Display for Error {
             }
             Error::ListEmpty => f.write_str("a list needs at least one source"),
             Error::EmptyListName => f.write_str("a list needs a name"),
+            Error::Busy => f.write_str("another blk process is running; try again"),
             Error::AlreadyPaused(record) => match record.until {
                 Some(until) => write!(
                     f,
@@ -359,6 +362,10 @@ mod tests {
             "a list needs at least one source"
         );
         assert_eq!(Error::EmptyListName.to_string(), "a list needs a name");
+        assert_eq!(
+            Error::Busy.to_string(),
+            "another blk process is running; try again"
+        );
     }
 
     #[test]

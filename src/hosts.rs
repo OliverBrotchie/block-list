@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+use crate::lock::Lock;
 use crate::region::{self, Parsed};
 
 /// A hosts file read once, with its managed region located.
@@ -54,9 +55,14 @@ impl Hosts {
     }
 
     /// Replace the managed region, after backing up the file.
+    /// The file is read again under the lock so concurrent writers cannot interleave.
     pub fn commit(&self, state: &Path, rendered: &str) -> Result<()> {
-        let next = region::replace(&self.contents, self.parsed()?, rendered);
         require_root(&self.path)?;
+        let _lock = Lock::acquire(state)?;
+        let contents = fs::read_to_string(&self.path)
+            .map_err(|err| Error::io("read", self.path.display().to_string(), err))?;
+        let parsed = region::parse(&contents)?;
+        let next = region::replace(&contents, parsed.as_ref(), rendered);
         backup(state, &self.path)?;
         write_atomic(&self.path, &next)
     }
