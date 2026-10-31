@@ -16,6 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use dialoguer::console::style;
+use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 
 use error::{Error, Result};
@@ -158,47 +160,399 @@ fn bare(cli: &Cli, state: &Path) -> Result<()> {
     std::process::exit(2);
 }
 
+fn theme() -> ColorfulTheme {
+    ColorfulTheme::default()
+}
+
+fn hint(text: &str) {
+    println!("{}", style(text).dim().italic());
+}
+
+fn header(cli: &Cli, state: &Path) -> Result<()> {
+    let record = pause::load(state)?.filter(|record| !record.is_expired(pause::now()));
+    let lock = if record.is_some() { "🔓" } else { "🔒" };
+    let summary = match hosts::Hosts::read_lenient(&cli.hosts) {
+        Ok(hosts) => match hosts.parsed() {
+            Ok(Some(parsed)) => {
+                let count = parsed.sections.len();
+                let noun = if count == 1 { "section" } else { "sections" };
+                format!("{count} {noun}")
+            }
+            Ok(None) => "no region".to_string(),
+            Err(_) => "region error".to_string(),
+        },
+        Err(_) => "hosts not readable".to_string(),
+    };
+    println!();
+    println!("{}  {}", style(lock).bold(), style("blk").bold());
+    println!(
+        "{}  {}",
+        style(cli.hosts.display()).dim(),
+        style(summary).dim()
+    );
+    if let Some(record) = record {
+        println!(
+            "{}",
+            style(format!("paused: {}", record.describe())).yellow()
+        );
+    }
+    Ok(())
+}
+
+/// Keep the menu open after a failed action, but let a cancelled prompt abort.
+fn attempt(outcome: Result<()>) -> Result<()> {
+    match outcome {
+        Ok(()) => Ok(()),
+        Err(Error::Dialog(error)) => Err(Error::Dialog(error)),
+        Err(error) => {
+            eprintln!("{error}");
+            Ok(())
+        }
+    }
+}
+
+fn submenu(prompt: &str, items: &[&str]) -> Result<Option<usize>> {
+    hint("up/down move, enter select");
+    let pick = Select::with_theme(&theme())
+        .with_prompt(prompt)
+        .items(items)
+        .default(0)
+        .interact()?;
+    Ok((pick + 1 != items.len()).then_some(pick))
+}
+
 fn menu(cli: &Cli, state: &Path) -> Result<()> {
-    let items = [
-        "Status",
-        "Update",
-        "Sources",
-        "Pause",
-        "Resume",
-        "Off",
-        "Test domain",
-        "Doctor",
-        "Edit config",
-        "Quit",
-    ];
+    // Choosing in the menu is the confirmation, so no second prompt.
+    let cli = Cli {
+        hosts: cli.hosts.clone(),
+        quiet: cli.quiet,
+        dry_run: cli.dry_run,
+        offline: cli.offline,
+        yes: true,
+        command: None,
+    };
     loop {
-        let pick = Select::new()
+        header(&cli, state)?;
+        hint("up/down move, enter open");
+        let pick = Select::with_theme(&theme())
             .with_prompt("blk")
-            .items(&items)
+            .items(&["Blocking", "Sources", "Lists", "Tools", "Quit"])
             .default(0)
             .interact()?;
+        let outcome = match pick {
+            0 => blocking_menu(&cli, state),
+            1 => sources_menu(&cli, state),
+            2 => lists_menu(&cli, state),
+            3 => tools_menu(&cli, state),
+            _ => return Ok(()),
+        };
+        attempt(outcome)?;
+    }
+}
+
+fn blocking_menu(cli: &Cli, state: &Path) -> Result<()> {
+    loop {
+        let Some(pick) = submenu(
+            "Blocking",
+            &[
+                "Show status",
+                "Update now",
+                "Pause",
+                "Resume",
+                "Turn off",
+                "Back",
+            ],
+        )?
+        else {
+            return Ok(());
+        };
+        let outcome = match pick {
+            0 => status(cli, state, false),
+            1 => update(cli, state, &[], &[]),
+            2 => pause_menu(cli, state),
+            3 => resume(cli, state),
+            4 => off(cli, state),
+            _ => Ok(()),
+        };
+        attempt(outcome)?;
+    }
+}
+
+fn sources_menu(cli: &Cli, state: &Path) -> Result<()> {
+    loop {
+        let Some(pick) = submenu(
+            "Sources",
+            &[
+                "Choose sources",
+                "Add a source",
+                "Remove a source",
+                "Browse catalog",
+                "Back",
+            ],
+        )?
+        else {
+            return Ok(());
+        };
         match pick {
-            0 => status(cli, state, false)?,
-            1 => update(cli, state, &[], &[])?,
-            2 => sources_command(cli, state)?,
-            3 => pause_menu(cli, state)?,
-            4 => resume(cli, state)?,
-            5 => off(cli, state)?,
-            6 => {
-                let domain: String = Input::new().with_prompt("Domain").interact_text()?;
-                test_domain(cli, state, domain.trim())?;
-            }
-            7 => {
-                if let Err(err) = doctor(cli, state) {
-                    println!("{err}");
-                }
-            }
-            8 => config_command(state)?,
-            9 => break,
+            0 => attempt(sources_command(cli, state))?,
+            1 => attempt(add_source_menu(cli, state))?,
+            2 => attempt(remove_sources_menu(cli, state))?,
+            3 => attempt(catalog_command(None))?,
             _ => {}
         }
     }
+}
+
+fn add_source_menu(cli: &Cli, state: &Path) -> Result<()> {
+    hint("catalog id, URL, or local path");
+    let source: String = Input::with_theme(&theme())
+        .with_prompt("Source")
+        .interact_text()?;
+    let source = source.trim();
+    if source.is_empty() {
+        return Ok(());
+    }
+    add_command(cli, state, &[source.to_string()])
+}
+
+fn remove_sources_menu(cli: &Cli, state: &Path) -> Result<()> {
+    let config = config::load(state)?;
+    if config.sources.is_empty() {
+        println!("no sources configured");
+        return Ok(());
+    }
+    hint("space toggle, a select all, enter confirm");
+    let picked = MultiSelect::with_theme(&theme())
+        .with_prompt("Remove which sources?")
+        .items(&config.sources)
+        .interact()?;
+    if picked.is_empty() {
+        return Ok(());
+    }
+    let chosen: Vec<String> = picked
+        .iter()
+        .map(|&index| config.sources[index].clone())
+        .collect();
+    rm_command(cli, state, &chosen)
+}
+
+fn tools_menu(cli: &Cli, state: &Path) -> Result<()> {
+    loop {
+        let Some(pick) = submenu(
+            "Tools",
+            &["Test a domain", "Run doctor", "Edit config", "Back"],
+        )?
+        else {
+            return Ok(());
+        };
+        match pick {
+            0 => attempt(test_menu(cli, state))?,
+            1 => attempt(doctor(cli, state))?,
+            2 => attempt(config_command(state))?,
+            _ => {}
+        }
+    }
+}
+
+fn test_menu(cli: &Cli, state: &Path) -> Result<()> {
+    hint("exact hostname, for example ads.example");
+    let domain: String = Input::with_theme(&theme())
+        .with_prompt("Domain")
+        .interact_text()?;
+    test_domain(cli, state, domain.trim())
+}
+
+fn lists_menu(cli: &Cli, state: &Path) -> Result<()> {
+    loop {
+        let mut config = config::load(state)?;
+        let views = lists::views(&config);
+        let mut items: Vec<String> = views
+            .iter()
+            .map(|view| {
+                let mark = if view.enabled { "[on]" } else { "[off]" };
+                let kind = if view.custom { "custom" } else { "preset" };
+                let count = view.sources.len();
+                let unit = if count == 1 { "source" } else { "sources" };
+                format!("{mark} {:<22} {kind:<6} {count} {unit}", view.name)
+            })
+            .collect();
+        items.push("Create a list".to_string());
+        items.push("Back".to_string());
+        hint("up/down move, enter choose");
+        let pick = Select::with_theme(&theme())
+            .with_prompt("Lists")
+            .items(&items)
+            .default(0)
+            .interact()?;
+        if pick == views.len() {
+            attempt(create_list_menu(cli, state, &mut config))?;
+            continue;
+        }
+        if pick > views.len() {
+            return Ok(());
+        }
+        attempt(list_menu(cli, state, &mut config, &views[pick]))?;
+    }
+}
+
+fn list_menu(
+    cli: &Cli,
+    state: &Path,
+    config: &mut config::Config,
+    view: &lists::View,
+) -> Result<()> {
+    let toggle_label = if view.enabled { "Turn off" } else { "Turn on" };
+    let mut items = vec![toggle_label];
+    if view.custom {
+        items.push("Edit sources");
+        items.push("Delete list");
+    }
+    items.push("Back");
+    let prompt = format!("List: {}", view.name);
+    let Some(pick) = submenu(&prompt, &items)? else {
+        return Ok(());
+    };
+    match pick {
+        0 => {
+            let result = lists::toggle(config, &view.name)?;
+            let message = toggle_message(&view.name, &result);
+            apply_lists(cli, state, config, &message)
+        }
+        1 if view.custom => edit_list_menu(cli, state, config, view),
+        2 if view.custom => delete_list_menu(cli, state, config, view),
+        _ => Ok(()),
+    }
+}
+
+fn create_list_menu(cli: &Cli, state: &Path, config: &mut config::Config) -> Result<()> {
+    hint("preset names are reserved");
+    let name: String = Input::with_theme(&theme())
+        .with_prompt("List name")
+        .interact_text()?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(Error::EmptyListName);
+    }
+    let sources = pick_sources(&[])?;
+    lists::create(config, &name, sources)?;
+    if cli.dry_run {
+        println!("would create list {name}");
+        return Ok(());
+    }
+    config::save(state, config)?;
+    if !cli.quiet {
+        println!("list {name} created");
+    }
     Ok(())
+}
+
+fn edit_list_menu(
+    cli: &Cli,
+    state: &Path,
+    config: &mut config::Config,
+    view: &lists::View,
+) -> Result<()> {
+    let before = config.sources.clone();
+    let sources = pick_sources(&view.sources)?;
+    lists::edit(config, &view.name, sources)?;
+    if cli.dry_run {
+        println!("would update list {}", view.name);
+        return Ok(());
+    }
+    if config.sources == before {
+        config::save(state, config)?;
+        if !cli.quiet {
+            println!("list {} updated", view.name);
+        }
+        return Ok(());
+    }
+    apply_lists(cli, state, config, &format!("list {} updated", view.name))
+}
+
+fn delete_list_menu(
+    cli: &Cli,
+    state: &Path,
+    config: &mut config::Config,
+    view: &lists::View,
+) -> Result<()> {
+    let confirmed = Confirm::with_theme(&theme())
+        .with_prompt(format!("Delete {}? Its sources stay configured", view.name))
+        .default(false)
+        .interact()?;
+    if !confirmed {
+        return Ok(());
+    }
+    lists::delete(config, &view.name)?;
+    if cli.dry_run {
+        println!("would delete list {}", view.name);
+        return Ok(());
+    }
+    config::save(state, config)?;
+    if !cli.quiet {
+        println!("list {} deleted", view.name);
+    }
+    Ok(())
+}
+
+fn apply_lists(cli: &Cli, state: &Path, config: &config::Config, message: &str) -> Result<()> {
+    change_sources(
+        cli,
+        state,
+        config.sources.clone(),
+        config.lists.clone(),
+        message,
+    )
+}
+
+fn pick_sources(preselected: &[String]) -> Result<Vec<String>> {
+    let ids = catalog::ids();
+    let mut items: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+    for source in preselected {
+        if catalog::get(source).is_none() && !items.contains(source) {
+            items.push(source.clone());
+        }
+    }
+    let defaults: Vec<bool> = items
+        .iter()
+        .map(|item| preselected.iter().any(|source| source == item))
+        .collect();
+    hint("space toggle, a select all, enter confirm");
+    let picked = MultiSelect::with_theme(&theme())
+        .with_prompt("Sources")
+        .items(&items)
+        .defaults(&defaults)
+        .interact()?;
+    let mut chosen: Vec<String> = picked.iter().map(|&index| items[index].clone()).collect();
+    hint("blank to skip");
+    let extra: String = Input::with_theme(&theme())
+        .with_prompt("Add a URL or path")
+        .allow_empty(true)
+        .interact_text()?;
+    let extra = extra.trim();
+    if !extra.is_empty() && !chosen.iter().any(|source| source == extra) {
+        chosen.push(extra.to_string());
+    }
+    Ok(chosen)
+}
+
+fn toggle_message(name: &str, result: &lists::Toggle) -> String {
+    if result.enabled {
+        if result.kept_by.is_empty() {
+            format!("{name} turned on")
+        } else {
+            format!(
+                "{name} stays on; sources kept for {}",
+                result.kept_by.join(", ")
+            )
+        }
+    } else if result.kept_by.is_empty() {
+        format!("{name} turned off")
+    } else {
+        format!(
+            "{name} turned off; sources kept for {}",
+            result.kept_by.join(", ")
+        )
+    }
 }
 
 fn pause_menu(cli: &Cli, state: &Path) -> Result<()> {
@@ -213,7 +567,8 @@ fn pause_menu(cli: &Cli, state: &Path) -> Result<()> {
         .map(|section| section.name.clone())
         .collect();
     let defaults = vec![true; names.len()];
-    let picked = MultiSelect::new()
+    hint("space toggle, a select all, enter confirm");
+    let picked = MultiSelect::with_theme(&theme())
         .with_prompt("Pause which sources?")
         .items(&names)
         .defaults(&defaults)
@@ -222,8 +577,9 @@ fn pause_menu(cli: &Cli, state: &Path) -> Result<()> {
         println!("nothing selected");
         return Ok(());
     }
-    let duration: String = Input::new()
-        .with_prompt("Duration (blank for until Ctrl-C)")
+    hint("30m, 2h, or blank to hold until Ctrl-C");
+    let duration: String = Input::with_theme(&theme())
+        .with_prompt("Duration")
         .allow_empty(true)
         .interact_text()?;
     let mut args: Vec<String> = picked.iter().map(|&index| names[index].clone()).collect();
@@ -254,7 +610,8 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
     } else {
         None
     };
-    apply(cli, state, &sources, persist.as_ref())
+    apply(cli, state, &sources, persist.as_ref())?;
+    Ok(())
 }
 
 /// Fetch or read every source, then replace the region in one write.
@@ -263,7 +620,7 @@ fn apply(
     state: &Path,
     sources: &[String],
     persist: Option<&config::Config>,
-) -> Result<()> {
+) -> Result<bool> {
     if sources.is_empty() {
         return Err(Error::NoSourcesConfigured);
     }
@@ -294,6 +651,11 @@ fn apply(
         .collect();
     let total: usize = sections.iter().map(|section| section.entries.len()).sum();
     let rendered = region::render(&sections);
+    let noun = if sources.len() == 1 {
+        "source"
+    } else {
+        "sources"
+    };
 
     if cli.dry_run {
         if !cli.quiet {
@@ -301,25 +663,25 @@ fn apply(
                 println!("{}: {} entries", section.name, section.entries.len());
             }
             println!(
-                "would write {total} entries from {} sources to {}",
+                "would write {total} entries from {} {noun} to {}",
                 sources.len(),
                 cli.hosts.display()
             );
         }
-        return Ok(());
+        return Ok(false);
     }
 
     if !cli.yes && !cli.quiet && std::io::stdin().is_terminal() {
-        let confirmed = Confirm::new()
+        let confirmed = Confirm::with_theme(&theme())
             .with_prompt(format!(
-                "Write {total} entries from {} sources to {}?",
+                "Write {total} entries from {} {noun} to {}?",
                 sources.len(),
                 cli.hosts.display()
             ))
             .default(false)
             .interact()?;
         if !confirmed {
-            return Ok(());
+            return Ok(false);
         }
     }
 
@@ -339,11 +701,11 @@ fn apply(
 
     if !cli.quiet {
         println!(
-            "Block List updated: {total} entries from {} sources",
+            "Block List updated: {total} entries from {} {noun}",
             sources.len()
         );
     }
-    Ok(())
+    Ok(true)
 }
 
 fn sources_command(cli: &Cli, state: &Path) -> Result<()> {
@@ -368,7 +730,8 @@ fn sources_command(cli: &Cli, state: &Path) -> Result<()> {
         .iter()
         .map(|id| config.sources.iter().any(|source| source == id))
         .collect();
-    let picked = MultiSelect::new()
+    hint("space toggle, a select all, enter confirm");
+    let picked = MultiSelect::with_theme(&theme())
         .with_prompt("Sources")
         .items(&ids)
         .defaults(&defaults)
@@ -381,8 +744,9 @@ fn sources_command(cli: &Cli, state: &Path) -> Result<()> {
         }
     }
 
-    let extra: String = Input::new()
-        .with_prompt("Add a URL or path (blank to skip)")
+    hint("blank to skip");
+    let extra: String = Input::with_theme(&theme())
+        .with_prompt("Add a URL or path")
         .allow_empty(true)
         .interact_text()?;
     let extra = extra.trim();
@@ -413,23 +777,7 @@ fn lists_command(cli: &Cli, state: &Path, action: Option<&ListsAction>) -> Resul
         Some(ListsAction::Toggle { name }) => {
             let mut config = config::load(state)?;
             let result = lists::toggle(&mut config, name)?;
-            let message = if result.enabled {
-                if result.kept_by.is_empty() {
-                    format!("{name} turned on")
-                } else {
-                    format!(
-                        "{name} stays on; sources kept for {}",
-                        result.kept_by.join(", ")
-                    )
-                }
-            } else if result.kept_by.is_empty() {
-                format!("{name} turned off")
-            } else {
-                format!(
-                    "{name} turned off; sources kept for {}",
-                    result.kept_by.join(", ")
-                )
-            };
+            let message = toggle_message(name, &result);
             change_sources(cli, state, config.sources, config.lists, &message)
         }
     }
@@ -481,7 +829,12 @@ fn change_sources(
             println!("{source}");
         }
         if !cli.quiet {
-            println!("would save and apply {} sources", sources.len());
+            let noun = if sources.len() == 1 {
+                "source"
+            } else {
+                "sources"
+            };
+            println!("would save and apply {} {noun}", sources.len());
         }
         return Ok(());
     }
@@ -507,8 +860,8 @@ fn change_sources(
         return Ok(());
     }
 
-    apply(cli, state, &sources, Some(&next))?;
-    if !cli.quiet {
+    let applied = apply(cli, state, &sources, Some(&next))?;
+    if applied && !cli.quiet {
         println!("{message}");
     }
     Ok(())
@@ -584,8 +937,13 @@ fn status(cli: &Cli, state: &Path, json: bool) -> Result<()> {
                 .map(|section| section.entries.len())
                 .sum();
             if !cli.quiet {
+                let noun = if parsed.sections.len() == 1 {
+                    "source"
+                } else {
+                    "sources"
+                };
                 println!(
-                    "{}: {total} entries in {} sources",
+                    "{}: {total} entries in {} {noun}",
                     cli.hosts.display(),
                     parsed.sections.len()
                 );
@@ -777,6 +1135,9 @@ fn doctor(cli: &Cli, state: &Path) -> Result<()> {
         }
     };
     match &parsed {
+        Some(parsed) if parsed.sections.len() == 1 => {
+            println!("region: ok, 1 section");
+        }
         Some(parsed) => println!("region: ok, {} sections", parsed.sections.len()),
         None => println!("region: none"),
     }

@@ -109,8 +109,6 @@ fn unknown(name: &str) -> Error {
     }
 }
 
-// Used by the interactive list manager added in #16.
-#[allow(dead_code)]
 fn dedupe(sources: Vec<String>) -> Vec<String> {
     let mut out = Vec::new();
     for source in sources {
@@ -165,7 +163,6 @@ pub fn toggle(config: &mut Config, name: &str) -> Result<Toggle> {
 }
 
 /// Replace a custom list's members, syncing sources when it is on.
-#[allow(dead_code)] // used by the interactive manager in #16
 pub fn edit(config: &mut Config, name: &str, sources: Vec<String>) -> Result<()> {
     let name = name.trim();
     if name.is_empty() {
@@ -206,7 +203,6 @@ pub fn edit(config: &mut Config, name: &str, sources: Vec<String>) -> Result<()>
     Ok(())
 }
 
-#[allow(dead_code)] // used by the interactive manager in #16
 pub fn create(config: &mut Config, name: &str, sources: Vec<String>) -> Result<()> {
     let name = name.trim();
     if name.is_empty() {
@@ -234,7 +230,6 @@ pub fn create(config: &mut Config, name: &str, sources: Vec<String>) -> Result<(
 }
 
 /// Remove a custom list. Its sources stay configured.
-#[allow(dead_code)] // used by the interactive manager in #16
 pub fn delete(config: &mut Config, name: &str) -> Result<()> {
     if preset(name).is_some() {
         return Err(Error::ListReserved {

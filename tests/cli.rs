@@ -368,7 +368,7 @@ fn status_reports_sections() {
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("2 entries in 1 sources"),
+        stdout.contains("2 entries in 1 source"),
         "stdout: {}",
         stdout
     );
