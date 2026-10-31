@@ -172,15 +172,7 @@ fn header(cli: &Cli, state: &Path) -> Result<()> {
     let record = pause::load(state)?.filter(|record| !record.is_expired(pause::now()));
     let (summary, active) = match hosts::Hosts::read_lenient(&cli.hosts) {
         Ok(hosts) => match hosts.parsed() {
-            Ok(Some(parsed)) => {
-                let count = parsed.sections.len();
-                if count == 0 {
-                    ("no block list".to_string(), false)
-                } else {
-                    let noun = if count == 1 { "section" } else { "sections" };
-                    (format!("{count} {noun}"), true)
-                }
-            }
+            Ok(Some(parsed)) => (String::new(), !parsed.sections.is_empty()),
             Ok(None) => ("no block list".to_string(), false),
             Err(_) => ("region error".to_string(), false),
         },
@@ -197,13 +189,21 @@ fn header(cli: &Cli, state: &Path) -> Result<()> {
     if cli.hosts != Path::new("/etc/hosts") {
         parts.push(cli.hosts.display().to_string());
     }
-    parts.push(tail);
-    let line = if paused {
-        style(parts.join(" · ")).yellow()
+    if !tail.is_empty() {
+        parts.push(tail);
+    }
+    let title = format!("\n{} {}", style(lock).bold(), style("blk").bold());
+    if parts.is_empty() {
+        println!("{title}");
     } else {
-        style(parts.join(" · ")).dim()
-    };
-    println!("\n{} {} · {line}", style(lock).bold(), style("blk").bold());
+        let detail = parts.join(" · ");
+        let detail = if paused {
+            style(detail).yellow()
+        } else {
+            style(detail).dim()
+        };
+        println!("{title} · {detail}");
+    }
     Ok(())
 }
 
@@ -268,7 +268,7 @@ fn menu(cli: &Cli, state: &Path) -> Result<()> {
         header(&cli, state)?;
         hint("↑/↓ move · enter open");
         let pick = Select::with_theme(&theme())
-            .with_prompt("blk")
+            .with_prompt("Menu")
             .items(&["Blocking", "Sources", "Lists", "Tools", "Quit"])
             .default(0)
             .interact_opt()?;
