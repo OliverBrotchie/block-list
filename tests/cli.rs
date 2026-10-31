@@ -845,3 +845,171 @@ fn bare_without_a_tty_prints_status_and_exits_two() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("no block region"));
     assert!(String::from_utf8_lossy(&out.stderr).contains("usage"));
 }
+
+#[test]
+fn atomic_write_keeps_the_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (dir, hosts) = setup("mode", "127.0.0.1 localhost\n");
+    fs::set_permissions(&hosts, fs::Permissions::from_mode(0o600)).unwrap();
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let mode = fs::metadata(&hosts).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn resume_dry_run_does_not_write() {
+    let (dir, hosts) = setup("resume-dry", "127.0.0.1 localhost\n");
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap()
+        ]
+    )
+    .status
+    .success());
+    assert!(run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "pause", "a.hosts"]
+    )
+    .status
+    .success());
+    let paused = fs::read_to_string(&hosts).unwrap();
+
+    let out = run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "--dry-run", "resume"],
+    );
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("would restore"));
+    assert_eq!(fs::read_to_string(&hosts).unwrap(), paused);
+    assert!(dir.path().join("state").join("pause.toml").exists());
+}
+
+#[test]
+fn an_expired_pause_is_restored_by_the_test_command() {
+    let (dir, hosts) = setup("expired-test", "127.0.0.1 localhost\n");
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap()
+        ]
+    )
+    .status
+    .success());
+    assert!(run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "pause", "a.hosts", "1s"]
+    )
+    .status
+    .success());
+    std::thread::sleep(Duration::from_secs(2));
+
+    let out = run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "test", "ads.example"],
+    );
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("blocked by blk"));
+    assert!(!dir.path().join("state").join("pause.toml").exists());
+}
+
+#[test]
+fn status_prints_a_drift_warning() {
+    let (dir, hosts) = setup("drift-text", "127.0.0.1 localhost\n");
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap()
+        ]
+    )
+    .status
+    .success());
+
+    let text = fs::read_to_string(&hosts).unwrap();
+    fs::write(
+        &hosts,
+        text.replace(
+            "0.0.0.0 ads.example",
+            "0.0.0.0 ads.example\n0.0.0.0 hand.edit",
+        ),
+    )
+    .unwrap();
+
+    let out = run(&dir, &["--hosts", hosts.to_str().unwrap(), "status"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("warning: region-drift"));
+}
+
+#[test]
+fn drift_is_skipped_while_paused() {
+    let (dir, hosts) = setup("drift-paused", "127.0.0.1 localhost\n");
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    let b = list(&dir, "b.hosts", "0.0.0.0 tracker.example\n");
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap(),
+            b.to_str().unwrap()
+        ]
+    )
+    .status
+    .success());
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "pause",
+            "a.hosts",
+            "30m"
+        ]
+    )
+    .status
+    .success());
+
+    let json = run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "status", "--json"],
+    );
+    assert!(!String::from_utf8_lossy(&json.stdout).contains("region-drift"));
+
+    let doctor = run(&dir, &["--hosts", hosts.to_str().unwrap(), "doctor"]);
+    assert!(
+        doctor.status.success(),
+        "{}",
+        String::from_utf8_lossy(&doctor.stdout)
+    );
+    assert!(String::from_utf8_lossy(&doctor.stdout).contains("skipped while paused"));
+}

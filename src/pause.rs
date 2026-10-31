@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pause {
     pub paused: Vec<String>,
-    pub hosts_path: String,
+    pub hosts_path: PathBuf,
     pub started: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub until: Option<u64>,
@@ -47,7 +47,10 @@ pub fn parse_duration(text: &str) -> Result<u64, String> {
             'd' => 86_400,
             _ => return Err(format!("invalid duration unit '{c}' in {text}")),
         };
-        total += value * seconds;
+        total = value
+            .checked_mul(seconds)
+            .and_then(|part| total.checked_add(part))
+            .ok_or_else(|| format!("duration is too large: {text}"))?;
         saw_unit = true;
     }
     if !number.is_empty() {
@@ -106,13 +109,14 @@ mod tests {
         assert!(parse_duration("30").is_err());
         assert!(parse_duration("30x").is_err());
         assert!(parse_duration("").is_err());
+        assert!(parse_duration("18446744073709551615m").is_err());
     }
 
     #[test]
     fn expiry_uses_the_deadline() {
         let pause = Pause {
             paused: vec!["a".into()],
-            hosts_path: "/etc/hosts".into(),
+            hosts_path: PathBuf::from("/etc/hosts"),
             started: 100,
             until: Some(200),
         };
@@ -125,7 +129,7 @@ mod tests {
     fn indefinite_pause_never_expires() {
         let pause = Pause {
             paused: vec!["a".into()],
-            hosts_path: "/etc/hosts".into(),
+            hosts_path: PathBuf::from("/etc/hosts"),
             started: 100,
             until: None,
         };

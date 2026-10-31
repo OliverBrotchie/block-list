@@ -15,6 +15,8 @@ pub struct Loaded {
     pub counts: Option<Counts>,
     pub warnings: Vec<String>,
     /// Whether any part of the source came from the network in this run.
+    /// Read only by the conditional-GET test; the CLI no longer branches on it.
+    #[allow(dead_code)]
     pub fetched: bool,
 }
 
@@ -80,20 +82,19 @@ fn load_catalog(
     offline: bool,
     write_cache: bool,
 ) -> Result<Loaded, String> {
-    let slug = id.replace('/', "-");
-    let root = cache_root(dir);
+    let root = cache_path(dir, id);
     let mut entries: Vec<Entry> = Vec::new();
     let mut seen = HashSet::new();
     let mut counts = Counts::default();
     let mut abp = false;
     let mut fetched = false;
+    let mut warnings = Vec::new();
 
     for (index, url) in entry.urls.iter().enumerate() {
         let path = if entry.urls.len() == 1 {
-            root.join(&slug)
+            root.clone()
         } else {
-            root.join(&slug)
-                .join(format!("{index:02}-{}", sanitize(url)))
+            root.join(format!("{index:02}-{}", sanitize(url)))
         };
         let (text, downloaded) = fetch_or_cache(url, &path, offline, write_cache)?;
         fetched |= downloaded;
@@ -102,6 +103,10 @@ fn load_catalog(
             Format::Hosts => {
                 let (parsed, _) = region::entries_from_hosts(&text);
                 if parsed.is_empty() {
+                    if entry.urls.len() > 1 {
+                        warnings.push(format!("{url} contains no usable entries"));
+                        continue;
+                    }
                     return Err(format!("{url} contains no usable entries"));
                 }
                 merge(&mut entries, &mut seen, parsed);
@@ -109,6 +114,10 @@ fn load_catalog(
             _ => {
                 let parsed = catalog::parse(&text, entry.format);
                 if parsed.domains.is_empty() {
+                    if entry.urls.len() > 1 {
+                        warnings.push(format!("{url} yielded no domains"));
+                        continue;
+                    }
                     return Err(format!("{url} yielded no domains"));
                 }
                 if entry.format == Format::Abp {
@@ -135,7 +144,7 @@ fn load_catalog(
         name: id.to_string(),
         entries,
         counts: if abp { Some(counts) } else { None },
-        warnings: Vec::new(),
+        warnings,
         fetched,
     })
 }
@@ -183,6 +192,7 @@ fn fetch_or_cache(
                         .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
                 }
                 fs::write(path, &body).map_err(|error| format!("cannot cache {url}: {error}"))?;
+                let _ = fs::write(sidecar(path, "src"), url);
                 match etag {
                     Some(etag) => {
                         let _ = fs::write(&etag_path, etag);
@@ -211,6 +221,16 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
 
 fn cache_root(dir: &Path) -> PathBuf {
     dir.join("cache")
+}
+
+/// Where a source's cache entry lives. Catalog ids replace `/` with `-`.
+pub fn cache_path(dir: &Path, source: &str) -> PathBuf {
+    let slug = if catalog::get(source).is_some() {
+        source.replace('/', "-")
+    } else {
+        sanitize(source)
+    };
+    cache_root(dir).join(slug)
 }
 
 fn is_url(source: &str) -> bool {
@@ -338,6 +358,7 @@ mod tests {
         assert!(first[0].fetched);
         let cache = dir.join("cache").join("stevenblack-hosts");
         assert!(cache.exists());
+        assert!(dir.join("cache").join("stevenblack-hosts.src").exists());
 
         let second = load_all(&dir, &source, false, true).unwrap();
         assert!(!second[0].fetched, "expected a 304");

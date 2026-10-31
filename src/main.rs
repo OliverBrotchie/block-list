@@ -15,8 +15,6 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 
-use region::Entry;
-
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Parser)]
@@ -115,12 +113,12 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     match &cli.command {
         Some(Cmd::Update { sources, from }) => update(cli, &state, sources, from),
         Some(Cmd::Status { json }) => status(cli, &state, *json),
-        Some(Cmd::Test { domain }) => test_domain(cli, domain),
+        Some(Cmd::Test { domain }) => test_domain(cli, &state, domain),
         Some(Cmd::Doctor) => doctor(cli, &state),
         Some(Cmd::Config) => config_command(&state),
         Some(Cmd::Off) => off(cli, &state),
         Some(Cmd::Pause { args }) => pause_command(cli, &state, args),
-        Some(Cmd::Resume) => resume(&state),
+        Some(Cmd::Resume) => resume(cli, &state),
         Some(Cmd::Sources) => sources_command(cli, &state),
         Some(Cmd::Add { sources }) => add_command(cli, &state, sources),
         Some(Cmd::Rm { sources }) => rm_command(cli, &state, sources),
@@ -164,11 +162,11 @@ fn menu(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
             1 => update(cli, state, &[], &[])?,
             2 => sources_command(cli, state)?,
             3 => pause_menu(cli, state)?,
-            4 => resume(state)?,
+            4 => resume(cli, state)?,
             5 => off(cli, state)?,
             6 => {
                 let domain: String = Input::new().with_prompt("Domain").interact_text()?;
-                test_domain(cli, domain.trim())?;
+                test_domain(cli, state, domain.trim())?;
             }
             7 => {
                 if let Err(err) = doctor(cli, state) {
@@ -217,6 +215,9 @@ fn pause_menu(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(), Box<dyn Error>> {
+    if !cli.dry_run {
+        restore_expired(state)?;
+    }
     let config = config::load(state)?;
     let mut sources = if args.is_empty() {
         config.sources
@@ -247,7 +248,7 @@ fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<(
             eprintln!("warning: {}: {warning}", source.name);
         }
         if let Some(counts) = source.counts {
-            if source.fetched && !cli.quiet {
+            if !cli.quiet {
                 println!(
                     "{}: kept {}, dropped {} cosmetic, {} path or option, {} exceptions subtracted",
                     source.name, counts.kept, counts.cosmetic, counts.other, counts.exceptions
@@ -256,17 +257,20 @@ fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<(
         }
     }
 
-    let sections: Vec<(String, Vec<Entry>)> = loaded
+    let sections: Vec<region::Section> = loaded
         .iter()
-        .map(|source| (source.name.clone(), source.entries.clone()))
+        .map(|source| region::Section {
+            name: source.name.clone(),
+            entries: source.entries.clone(),
+        })
         .collect();
-    let total: usize = sections.iter().map(|(_, entries)| entries.len()).sum();
+    let total: usize = sections.iter().map(|section| section.entries.len()).sum();
     let rendered = region::render(&sections);
 
     if cli.dry_run {
         if !cli.quiet {
-            for (name, entries) in &sections {
-                println!("{name}: {} entries", entries.len());
+            for section in &sections {
+                println!("{}: {} entries", section.name, section.entries.len());
             }
             println!(
                 "would write {total} entries from {} sources to {}",
@@ -296,17 +300,11 @@ fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<(
     backup(&cli.hosts)?;
     write_hosts(&cli.hosts, &next)?;
 
-    let counts = loaded
-        .iter()
-        .map(|source| (source.name.clone(), source.entries.len()))
-        .collect();
     state::save(
         state,
         &state::State {
             last_update: pause::now(),
-            hosts_path: cli.hosts.display().to_string(),
             region_hash: state::hash_region(&rendered),
-            counts,
         },
     )?;
     if persist {
@@ -329,6 +327,9 @@ fn apply(cli: &Cli, state: &Path, sources: &[String], persist: bool) -> Result<(
 }
 
 fn sources_command(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+    if !cli.dry_run {
+        restore_expired(state)?;
+    }
     let config = config::load(state)?;
     if !std::io::stdin().is_terminal() {
         if config.sources.is_empty() {
@@ -492,7 +493,9 @@ fn clear_region(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 fn status(cli: &Cli, state: &Path, json: bool) -> Result<(), Box<dyn Error>> {
-    restore_expired(state)?;
+    if !cli.dry_run {
+        restore_expired(state)?;
+    }
 
     let contents = read_hosts(&cli.hosts)?;
     let parsed = region::parse(&contents)?;
@@ -505,6 +508,12 @@ fn status(cli: &Cli, state: &Path, json: bool) -> Result<(), Box<dyn Error>> {
     if let Some(update) = state::load(state)? {
         if !cli.quiet {
             println!("last update: {}", local_datetime(update.last_update));
+        }
+    }
+
+    if !cli.quiet {
+        for warning in status_warnings(state, &contents, parsed.as_ref())? {
+            println!("warning: {warning}");
         }
     }
 
@@ -616,10 +625,15 @@ fn status_warnings(
     if contents.contains("# Block List") {
         warnings.push("legacy-block-list".to_string());
     }
-    if let (Some(parsed), Some(update)) = (parsed, state::load(state)?) {
-        let region = &contents[parsed.begin..parsed.end];
-        if state::hash_region(region) != update.region_hash {
-            warnings.push("region-drift".to_string());
+    let paused = pause::load(state)?
+        .filter(|record| !record.is_expired(pause::now()))
+        .is_some();
+    if !paused {
+        if let (Some(parsed), Some(update)) = (parsed, state::load(state)?) {
+            let region = &contents[parsed.begin..parsed.end];
+            if state::hash_region(region) != update.region_hash {
+                warnings.push("region-drift".to_string());
+            }
         }
     }
     if let Some(record) = pause::load(state)? {
@@ -628,11 +642,8 @@ fn status_warnings(
         }
     }
     for source in config::load(state)?.sources {
-        if catalog::get(&source).is_some() {
-            let slug = source.replace('/', "-");
-            if !state.join("cache").join(slug).exists() {
-                warnings.push(format!("cache-missing:{source}"));
-            }
+        if catalog::get(&source).is_some() && !sources::cache_path(state, &source).exists() {
+            warnings.push(format!("cache-missing:{source}"));
         }
     }
     Ok(warnings)
@@ -646,6 +657,7 @@ fn json_string(value: &str) -> String {
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
             _ => out.push(c),
         }
     }
@@ -653,7 +665,10 @@ fn json_string(value: &str) -> String {
     out
 }
 
-fn test_domain(cli: &Cli, domain: &str) -> Result<(), Box<dyn Error>> {
+fn test_domain(cli: &Cli, state: &Path, domain: &str) -> Result<(), Box<dyn Error>> {
+    if !cli.dry_run {
+        restore_expired(state)?;
+    }
     let contents = read_hosts(&cli.hosts)?;
     let parsed = region::parse(&contents)?;
 
@@ -693,6 +708,9 @@ fn test_domain(cli: &Cli, domain: &str) -> Result<(), Box<dyn Error>> {
 }
 
 fn doctor(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
+    if !cli.dry_run {
+        restore_expired(state)?;
+    }
     let mut problems = 0;
     if !can_write() {
         println!("root: not running as root; writes would need sudo");
@@ -716,8 +734,7 @@ fn doctor(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
         let Some(entry) = catalog::get(&source) else {
             continue;
         };
-        let slug = source.replace('/', "-");
-        let path = state.join("cache").join(&slug);
+        let path = sources::cache_path(state, &source);
         if !path.exists() {
             problems += 1;
             println!("cache: missing for {source}");
@@ -739,9 +756,14 @@ fn doctor(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     if contents.contains("# Block List") {
         println!("warning: a legacy # Block List is present; blk leaves it alone");
     }
+    let paused = pause::load(state)?
+        .filter(|record| !record.is_expired(pause::now()))
+        .is_some();
     if let (Some(parsed), Some(update)) = (&parsed, state::load(state)?) {
         let region = &contents[parsed.begin..parsed.end];
-        if state::hash_region(region) == update.region_hash {
+        if paused {
+            println!("drift: skipped while paused");
+        } else if state::hash_region(region) == update.region_hash {
             println!("drift: none");
         } else {
             problems += 1;
@@ -798,13 +820,17 @@ fn config_command(state: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 fn off(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
-    end_expired_pause(state)?;
+    if !cli.dry_run {
+        end_expired_pause(state)?;
+    }
     if let Some(record) = pause::load(state)? {
-        return Err(format!(
-            "already paused ({}); run blk resume first",
-            describe(&record)
-        )
-        .into());
+        if !(cli.dry_run && record.is_expired(pause::now())) {
+            return Err(format!(
+                "already paused ({}); run blk resume first",
+                describe(&record)
+            )
+            .into());
+        }
     }
 
     let contents = read_hosts(&cli.hosts)?;
@@ -829,7 +855,7 @@ fn off(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
             .iter()
             .map(|section| section.name.clone())
             .collect(),
-        hosts_path: cli.hosts.display().to_string(),
+        hosts_path: cli.hosts.clone(),
         started: pause::now(),
         until: None,
     };
@@ -850,13 +876,17 @@ fn off(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
 
 fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<(), Box<dyn Error>> {
     let (sources, until) = split_args(args)?;
-    end_expired_pause(state)?;
+    if !cli.dry_run {
+        end_expired_pause(state)?;
+    }
     if let Some(record) = pause::load(state)? {
-        return Err(format!(
-            "already paused ({}); run blk resume first",
-            describe(&record)
-        )
-        .into());
+        if !(cli.dry_run && record.is_expired(pause::now())) {
+            return Err(format!(
+                "already paused ({}); run blk resume first",
+                describe(&record)
+            )
+            .into());
+        }
     }
 
     let contents = read_hosts(&cli.hosts)?;
@@ -884,16 +914,16 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<(), Box<dyn
         }
     }
 
-    let kept: Vec<(String, Vec<Entry>)> = parsed
+    let kept: Vec<region::Section> = parsed
         .sections
         .iter()
         .filter(|section| !targets.contains(&section.name))
-        .map(|section| (section.name.clone(), section.entries.clone()))
+        .cloned()
         .collect();
     let snapshot = contents[parsed.begin..parsed.end].to_string();
     let record = pause::Pause {
         paused: targets,
-        hosts_path: cli.hosts.display().to_string(),
+        hosts_path: cli.hosts.clone(),
         started: pause::now(),
         until,
     };
@@ -924,11 +954,21 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<(), Box<dyn
     hold(state, &record)
 }
 
-fn resume(state: &Path) -> Result<(), Box<dyn Error>> {
+fn resume(cli: &Cli, state: &Path) -> Result<(), Box<dyn Error>> {
     let Some(record) = pause::load(state)? else {
         println!("not paused");
         return Ok(());
     };
+    if cli.dry_run {
+        if !cli.quiet {
+            println!(
+                "would restore {} and resume {}",
+                record.hosts_path.display(),
+                record.paused.join(", ")
+            );
+        }
+        return Ok(());
+    }
     resume_from(state, &record)?;
     println!("Block List resumed");
     Ok(())
@@ -967,6 +1007,10 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>> {
         std::thread::sleep(Duration::from_secs(1));
     }
 
+    if pause::load(state)?.is_none() {
+        println!("pause was already resumed elsewhere");
+        return Ok(());
+    }
     resume_from(state, record)?;
     println!("Block List resumed");
     Ok(())
@@ -974,7 +1018,7 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>> {
 
 /// Restore the exact region saved at pause time.
 fn resume_from(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>> {
-    let hosts = PathBuf::from(&record.hosts_path);
+    let hosts = &record.hosts_path;
     let Some(snapshot) = pause::load_snapshot(state) else {
         return Err(format!(
             "the saved region for {} is missing; run `blk update` to rebuild it",
@@ -982,12 +1026,12 @@ fn resume_from(state: &Path, record: &pause::Pause) -> Result<(), Box<dyn Error>
         )
         .into());
     };
-    let contents = read_hosts(&hosts)?;
+    let contents = read_hosts(hosts)?;
     let parsed = region::parse(&contents)?;
-    require_root(&hosts)?;
-    backup(&hosts)?;
+    require_root(hosts)?;
+    backup(hosts)?;
     let next = region::replace(&contents, parsed.as_ref(), &snapshot);
-    write_hosts(&hosts, &next)?;
+    write_hosts(hosts, &next)?;
     pause::clear(state);
     Ok(())
 }
@@ -1078,6 +1122,7 @@ extern "C" fn handle_signal(_: libc::c_int) {
 }
 
 fn install_signal_handlers() {
+    INTERRUPTED.store(false, Ordering::SeqCst);
     let handler = handle_signal as extern "C" fn(libc::c_int);
     unsafe {
         libc::signal(libc::SIGINT, handler as libc::sighandler_t);

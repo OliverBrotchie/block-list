@@ -142,7 +142,7 @@ pub fn get_or_error(id: &str) -> Result<&'static Source, String> {
 }
 
 #[derive(Debug, Default)]
-pub struct Parsed {
+pub struct Conversion {
     /// Domains to block, deduped in first-seen order, with exceptions already removed.
     pub domains: Vec<String>,
     /// Domains named by `@@` exception rules.
@@ -154,7 +154,7 @@ pub struct Parsed {
     pub invalid: usize,
 }
 
-pub fn parse(text: &str, format: Format) -> Parsed {
+pub fn parse(text: &str, format: Format) -> Conversion {
     match format {
         Format::Hosts => hosts(text),
         Format::Domains => domains(text, false),
@@ -163,8 +163,8 @@ pub fn parse(text: &str, format: Format) -> Parsed {
     }
 }
 
-fn hosts(text: &str) -> Parsed {
-    let mut parsed = Parsed::default();
+fn hosts(text: &str) -> Conversion {
+    let mut parsed = Conversion::default();
     let mut seen = HashSet::new();
     for line in text.lines() {
         let line = line.trim();
@@ -186,8 +186,8 @@ fn hosts(text: &str) -> Parsed {
     parsed
 }
 
-fn domains(text: &str, wildcard: bool) -> Parsed {
-    let mut parsed = Parsed::default();
+fn domains(text: &str, wildcard: bool) -> Conversion {
+    let mut parsed = Conversion::default();
     let mut seen = HashSet::new();
     for line in text.lines() {
         let line = line.trim();
@@ -211,8 +211,8 @@ fn domains(text: &str, wildcard: bool) -> Parsed {
     parsed
 }
 
-fn abp(text: &str) -> Parsed {
-    let mut parsed = Parsed::default();
+fn abp(text: &str) -> Conversion {
+    let mut parsed = Conversion::default();
     let mut removed = HashSet::new();
     let mut seen = HashSet::new();
     for line in text.lines() {

@@ -108,16 +108,16 @@ pub fn parse(contents: &str) -> Result<Option<Parsed>, RegionError> {
 }
 
 /// Render a fresh region. One `# list:` section per source, in the given order.
-pub fn render(sections: &[(String, Vec<Entry>)]) -> String {
+pub fn render(sections: &[Section]) -> String {
     let mut out = String::new();
     out.push_str(BEGIN);
     out.push('\n');
-    for (name, entries) in sections {
+    for section in sections {
         out.push_str(LIST_PREFIX);
         out.push(' ');
-        out.push_str(name);
+        out.push_str(&section.name);
         out.push('\n');
-        for entry in entries {
+        for entry in &section.entries {
             out.push_str(&entry.ip.to_string());
             out.push(' ');
             out.push_str(&entry.host);
@@ -271,23 +271,26 @@ mod tests {
     #[test]
     fn render_parses_back() {
         let sections = vec![
-            ("a".to_string(), vec![entry("0.0.0.0", "x.test")]),
-            ("b".to_string(), vec![entry("0.0.0.0", "y.test")]),
+            Section {
+                name: "a".to_string(),
+                entries: vec![entry("0.0.0.0", "x.test")],
+            },
+            Section {
+                name: "b".to_string(),
+                entries: vec![entry("0.0.0.0", "y.test")],
+            },
         ];
         let text = render(&sections);
         let parsed = parse(&text).unwrap().unwrap();
-        assert_eq!(
-            parsed.sections,
-            sections
-                .into_iter()
-                .map(|(name, entries)| Section { name, entries })
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(parsed.sections, sections);
     }
 
     #[test]
     fn replace_appends_once_and_is_idempotent() {
-        let region = render(&[("a".to_string(), vec![entry("0.0.0.0", "x.test")])]);
+        let region = render(&[Section {
+            name: "a".to_string(),
+            entries: vec![entry("0.0.0.0", "x.test")],
+        }]);
         let first = replace("127.0.0.1 localhost\n", None, &region);
         assert!(first.starts_with("127.0.0.1 localhost\n\n# BEGIN blk\n"));
         let parsed = parse(&first).unwrap();
@@ -297,7 +300,10 @@ mod tests {
 
     #[test]
     fn replace_keeps_content_after_the_region() {
-        let region = render(&[("a".to_string(), vec![entry("0.0.0.0", "x.test")])]);
+        let region = render(&[Section {
+            name: "a".to_string(),
+            entries: vec![entry("0.0.0.0", "x.test")],
+        }]);
         let text = format!("head\n{region}tail\n");
         let parsed = parse(&text).unwrap();
         let updated = replace(&text, parsed.as_ref(), &region);

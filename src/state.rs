@@ -1,15 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct State {
     pub last_update: u64,
-    pub hosts_path: String,
     pub region_hash: String,
-    #[serde(default)]
-    pub counts: BTreeMap<String, usize>,
 }
 
 pub fn path(dir: &Path) -> PathBuf {
