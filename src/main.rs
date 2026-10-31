@@ -619,6 +619,7 @@ fn apply_lists(cli: &Cli, state: &Path, config: &config::Config, message: &str) 
         config.sources.clone(),
         config.lists.clone(),
         message,
+        true,
     )
 }
 
@@ -780,7 +781,7 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
     } else {
         None
     };
-    apply(cli, state, &sources, persist.as_ref())?;
+    apply(cli, state, &sources, persist.as_ref(), false)?;
     Ok(())
 }
 
@@ -790,13 +791,21 @@ fn apply(
     state: &Path,
     sources: &[String],
     persist: Option<&config::Config>,
+    cache_first: bool,
 ) -> Result<bool> {
     if sources.is_empty() {
         return Err(Error::NoSourcesConfigured);
     }
 
     let hosts = hosts::Hosts::read(&cli.hosts)?;
-    let loaded = sources::load_all(state, sources, cli.offline, !cli.dry_run)?;
+    let mode = if cli.offline {
+        sources::Mode::Offline
+    } else if cache_first {
+        sources::Mode::CacheFirst
+    } else {
+        sources::Mode::Online
+    };
+    let loaded = sources::load_all(state, sources, mode, !cli.dry_run)?;
 
     for source in &loaded {
         for warning in &source.warnings {
@@ -930,7 +939,7 @@ fn sources_command(cli: &Cli, state: &Path) -> Result<bool> {
         chosen.push(extra.to_string());
     }
 
-    change_sources(cli, state, chosen, config.lists, "sources selected")?;
+    change_sources(cli, state, chosen, config.lists, "sources selected", false)?;
     Ok(true)
 }
 
@@ -955,7 +964,7 @@ fn lists_command(cli: &Cli, state: &Path, action: Option<&ListsAction>) -> Resul
             let mut config = config::load(state)?;
             let result = lists::toggle(&mut config, name)?;
             let message = toggle_message(name, &result);
-            change_sources(cli, state, config.sources, config.lists, &message)
+            change_sources(cli, state, config.sources, config.lists, &message, true)
         }
     }
 }
@@ -967,7 +976,7 @@ fn add_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
     let config = config::load(state)?;
     let mut chosen = config.sources;
     chosen.extend(sources.iter().cloned());
-    change_sources(cli, state, chosen, config.lists, "sources added")
+    change_sources(cli, state, chosen, config.lists, "sources added", false)
 }
 
 fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
@@ -984,7 +993,14 @@ fn rm_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
         .into_iter()
         .filter(|source| !sources.contains(source))
         .collect();
-    change_sources(cli, state, remaining, config.lists, "sources removed")
+    change_sources(
+        cli,
+        state,
+        remaining,
+        config.lists,
+        "sources removed",
+        false,
+    )
 }
 
 /// Save a new source list, then apply it unless a live pause holds the region.
@@ -994,6 +1010,7 @@ fn change_sources(
     sources: Vec<String>,
     lists: Vec<config::List>,
     message: &str,
+    cache_first: bool,
 ) -> Result<()> {
     let sources = dedupe(sources);
     let next = config::Config {
@@ -1040,7 +1057,7 @@ fn change_sources(
         return Ok(());
     }
 
-    let applied = apply(cli, state, &sources, Some(&next))?;
+    let applied = apply(cli, state, &sources, Some(&next), cache_first)?;
     if applied && !cli.quiet {
         println!("{message}");
     }

@@ -16,7 +16,7 @@ Added:
 - Hosts, plain domain, wildcard domain, and strict ABP parsers.
 - Conditional GET with ETag caches, `--offline` rebuilds, and `--dry-run`.
 - Interactive source selection, `add`, and `rm`.
-- Seven purpose lists with `blk lists` and `blk lists toggle <NAME>`, plus a menu manager for toggling, creating, editing, and deleting custom lists.
+- Seven purpose lists with `blk lists` and `blk lists toggle <NAME>`, plus a menu manager for toggling, creating, editing, and deleting custom lists. Toggling reuses cached sources.
 - Curated inline sources `blk/streaming` and `blk/social`, and Blocklist Project sources for YouTube, piracy, and torrent.
 - A grouped TTY menu with a ColorfulTheme, one-line key hints, and a lock or unlock header.
 - Pause accepts a bare number as minutes, and the menu pause picker groups enabled lists separately from individual sources.

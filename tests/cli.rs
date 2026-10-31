@@ -613,6 +613,40 @@ fn lists_show_and_toggle_a_preset() {
 }
 
 #[test]
+fn list_toggle_reuses_cached_sources() {
+    let (dir, hosts) = setup("list-cache", "127.0.0.1 localhost\n");
+    let state = dir.path().join("state");
+    fs::create_dir_all(state.join("cache")).unwrap();
+    fs::write(state.join("cache/x.hosts"), "0.0.0.0 cached.test\n").unwrap();
+    fs::write(
+        state.join("config.toml"),
+        "sources = []\n\n[[lists]]\nname = \"Cached\"\nsources = [\"https://127.0.0.1:1/x.hosts\"]\n",
+    )
+    .unwrap();
+
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "lists",
+            "toggle",
+            "Cached",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = fs::read_to_string(&hosts).unwrap();
+    assert!(text.contains("# list: x.hosts"), "{text}");
+    assert!(text.contains("0.0.0.0 cached.test"), "{text}");
+    let config = fs::read_to_string(state.join("config.toml")).unwrap();
+    assert!(config.contains("https://127.0.0.1:1/x.hosts"), "{config}");
+}
+
+#[test]
 fn lists_toggle_rejects_an_unknown_name() {
     let (dir, hosts) = setup("lists-unknown", "127.0.0.1 localhost\n");
     let out = run(

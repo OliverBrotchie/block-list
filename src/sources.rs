@@ -29,16 +29,23 @@ pub struct Counts {
     pub other: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Online,
+    Offline,
+    CacheFirst,
+}
+
 pub fn load_all(
     dir: &Path,
     sources: &[String],
-    offline: bool,
+    mode: Mode,
     write_cache: bool,
 ) -> Result<Vec<Loaded>> {
     let mut used = HashSet::new();
     let mut loaded = Vec::new();
     for source in sources {
-        loaded.push(load(dir, source, offline, write_cache, &mut used)?);
+        loaded.push(load(dir, source, mode, write_cache, &mut used)?);
     }
     Ok(loaded)
 }
@@ -46,12 +53,12 @@ pub fn load_all(
 fn load(
     dir: &Path,
     source: &str,
-    offline: bool,
+    mode: Mode,
     write_cache: bool,
     used: &mut HashSet<String>,
 ) -> Result<Loaded> {
     if let Some(entry) = catalog::get(source) {
-        return load_catalog(dir, source, entry, offline, write_cache);
+        return load_catalog(dir, source, entry, mode, write_cache);
     }
 
     if !is_url(source) && !Path::new(source).exists() {
@@ -64,7 +71,7 @@ fn load(
     let name = unique_name(sanitize(source), source, used);
     let (text, fetched) = if is_url(source) {
         let path = cache_root(dir).join(&name);
-        fetch_or_cache(source, &path, offline, write_cache)?
+        fetch_or_cache(source, &path, mode, write_cache)?
     } else {
         let text =
             fs::read_to_string(source).map_err(|err| Error::io("read", source.to_string(), err))?;
@@ -89,7 +96,7 @@ fn load_catalog(
     dir: &Path,
     id: &str,
     entry: &catalog::Source,
-    offline: bool,
+    mode: Mode,
     write_cache: bool,
 ) -> Result<Loaded> {
     let root = cache_path(dir, id);
@@ -117,7 +124,7 @@ fn load_catalog(
         } else {
             root.join(format!("{index:02}-{}", sanitize(url)))
         };
-        let (text, downloaded) = fetch_or_cache(url, &path, offline, write_cache)?;
+        let (text, downloaded) = fetch_or_cache(url, &path, mode, write_cache)?;
         fetched |= downloaded;
 
         match entry.format {
@@ -191,17 +198,20 @@ fn merge(entries: &mut Vec<Entry>, seen: &mut HashSet<(IpAddr, String)>, parsed:
     }
 }
 
-fn fetch_or_cache(
-    url: &str,
-    path: &Path,
-    offline: bool,
-    write_cache: bool,
-) -> Result<(String, bool)> {
-    if offline {
-        let body = fs::read_to_string(path).map_err(|_| Error::NoCachedCopy {
-            url: url.to_string(),
-        })?;
-        return Ok((body, false));
+fn fetch_or_cache(url: &str, path: &Path, mode: Mode, write_cache: bool) -> Result<(String, bool)> {
+    match mode {
+        Mode::Offline => {
+            let body = fs::read_to_string(path).map_err(|_| Error::NoCachedCopy {
+                url: url.to_string(),
+            })?;
+            return Ok((body, false));
+        }
+        Mode::CacheFirst => {
+            if let Ok(body) = fs::read_to_string(path) {
+                return Ok((body, false));
+            }
+        }
+        Mode::Online => {}
     }
 
     let etag_path = sidecar(path, "etag");
@@ -404,7 +414,7 @@ mod tests {
     #[test]
     fn inline_source_loads_without_cache() {
         let dir = temp_dir("inline");
-        let loaded = load_all(&dir, &["blk/social".to_string()], true, false).unwrap();
+        let loaded = load_all(&dir, &["blk/social".to_string()], Mode::Offline, false).unwrap();
         assert!(loaded[0]
             .entries
             .iter()
@@ -441,11 +451,29 @@ mod tests {
         let loaded = load_all(
             &dir,
             &["https://example.test/x.hosts".to_string()],
-            true,
+            Mode::Offline,
             false,
         )
         .unwrap();
         assert_eq!(loaded[0].name, "x.hosts");
+        assert_eq!(loaded[0].entries.len(), 1);
+        assert!(!loaded[0].fetched);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn cache_first_reads_without_network() {
+        let dir = temp_dir("cache-first");
+        fs::create_dir_all(dir.join("cache")).unwrap();
+        fs::write(dir.join("cache/x.hosts"), "0.0.0.0 cached.test\n").unwrap();
+
+        let loaded = load_all(
+            &dir,
+            &["https://127.0.0.1:1/x.hosts".to_string()],
+            Mode::CacheFirst,
+            false,
+        )
+        .unwrap();
         assert_eq!(loaded[0].entries.len(), 1);
         assert!(!loaded[0].fetched);
         fs::remove_dir_all(dir).ok();
@@ -457,7 +485,7 @@ mod tests {
         let error = load_all(
             &dir,
             &["https://example.test/missing.hosts".to_string()],
-            true,
+            Mode::Offline,
             false,
         )
         .unwrap_err();
@@ -470,13 +498,13 @@ mod tests {
     fn conditional_get_reuses_the_cache() {
         let dir = temp_dir("online");
         let source = vec!["stevenblack/hosts".to_string()];
-        let first = load_all(&dir, &source, false, true).unwrap();
+        let first = load_all(&dir, &source, Mode::Online, true).unwrap();
         assert!(first[0].fetched);
         let cache = dir.join("cache").join("stevenblack-hosts");
         assert!(cache.exists());
         assert!(dir.join("cache").join("stevenblack-hosts.src").exists());
 
-        let second = load_all(&dir, &source, false, true).unwrap();
+        let second = load_all(&dir, &source, Mode::Online, true).unwrap();
         assert!(!second[0].fetched, "expected a 304");
         assert_eq!(first[0].entries.len(), second[0].entries.len());
         fs::remove_dir_all(dir).ok();

@@ -74,6 +74,8 @@ A list is a named bundle of sources. Turning one on adds every member source. Tu
 
 `blk/social` and `blk/streaming` are curated domain lists shipped with the binary. They work offline, need no cache, and change only with a new release. The social list contains no WhatsApp domains. Streaming lists block the services themselves, not just their ads, so use them when you want whole-service blocking.
 
+Toggling a list reuses cached sources when they exist, so it is fast. Sources that are not cached are fetched, and `blk update` refreshes everything.
+
 Turning a list off keeps a source that another fully enabled list still needs. Editing an enabled custom list follows the same rule. Preset names are reserved and presets are immutable. Create, edit, and delete custom lists in the menu: run `blk`, choose Lists. Deleting a list keeps its sources configured.
 
 ## Pausing
