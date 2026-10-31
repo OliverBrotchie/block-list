@@ -66,7 +66,7 @@ The pause holds the terminal and shows the time left. Expiry, Ctrl-C, SIGTERM, a
 
 ## Sources
 
-`blk catalog` lists the built-in sources:
+`blk catalog` prints each source with its format, URL count, and licence. The first few:
 
 ```
 brave/default            abp       22 urls  MPL-2.0 plus upstream terms
@@ -101,7 +101,7 @@ The conversion is approximate. A hosts file cannot express exceptions, paths, op
 | `pause.toml` | the current pause record |
 | `pause.region` | the region as it was when the pause started |
 | `hosts.bak` | a copy of the hosts file from before the first change |
-| `cache/` | downloaded lists, with `.etag` sidecars |
+| `cache/` | downloaded lists, with `.etag` and `.src` sidecars |
 
 Set `BLK_DIR` to use a different directory. The test suite uses it.
 
