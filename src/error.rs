@@ -117,13 +117,15 @@ impl fmt::Display for Error {
                     known.join(", ")
                 )
             }
-            Error::AlreadyPaused(record) => {
-                write!(
+            Error::AlreadyPaused(record) => match record.until {
+                Some(until) => write!(
                     f,
-                    "already paused ({}); run blk resume first",
-                    record.describe()
-                )
-            }
+                    "already paused until {} ({} left); run blk resume first",
+                    crate::timefmt::local_hhmm(until),
+                    crate::timefmt::human_duration(until.saturating_sub(crate::pause::now()))
+                ),
+                None => f.write_str("already paused indefinitely; run blk resume first"),
+            },
             Error::NoBlockRegion { hosts } => {
                 write!(f, "{} has no block region to pause", hosts.display())
             }
@@ -168,7 +170,13 @@ impl fmt::Display for Error {
                 target,
                 source,
             } => write!(f, "cannot {action} {target}: {source}"),
-            Error::Fetch { url, source } => write!(f, "cannot fetch {url}: {source}"),
+            Error::Fetch { url, source } => {
+                // ureq repeats the URL at the start of its own message.
+                let text = source.to_string();
+                let prefix = format!("{url}: ");
+                let detail = text.strip_prefix(&prefix).unwrap_or(&text);
+                write!(f, "cannot fetch {url}: {detail}")
+            }
             Error::Region(error) => error.fmt(f),
             Error::Dialog(error) => write!(f, "prompt failed: {error}"),
         }
@@ -283,8 +291,23 @@ mod tests {
         };
         assert_eq!(
             Error::AlreadyPaused(record).to_string(),
-            "already paused (indefinitely); run blk resume first"
+            "already paused indefinitely; run blk resume first"
         );
+    }
+
+    #[test]
+    fn a_timed_pause_names_the_deadline_once() {
+        let now = crate::pause::now();
+        let record = crate::pause::Pause {
+            paused: vec!["oisd/big".into()],
+            hosts_path: PathBuf::from("/etc/hosts"),
+            started: now,
+            until: Some(now + 60),
+        };
+        let text = Error::AlreadyPaused(record).to_string();
+        assert!(text.starts_with("already paused until "), "{text}");
+        assert!(text.contains("left"), "{text}");
+        assert!(!text.contains("(("), "{text}");
     }
 
     #[test]
