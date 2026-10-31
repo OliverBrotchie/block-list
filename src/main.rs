@@ -228,11 +228,8 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
     } else {
         Vec::new()
     };
-    for source in args.iter().chain(from.iter()) {
-        if !sources.contains(source) {
-            sources.push(source.clone());
-        }
-    }
+    sources.extend(args.iter().chain(from.iter()).cloned());
+    let sources = dedupe(sources);
     let persist = !args.is_empty() || !from.is_empty();
     apply(cli, state, &sources, persist)
 }
@@ -379,11 +376,7 @@ fn add_command(cli: &Cli, state: &Path, sources: &[String]) -> Result<()> {
     }
     let config = config::load(state)?;
     let mut chosen = config.sources;
-    for source in sources {
-        if !chosen.contains(source) {
-            chosen.push(source.clone());
-        }
-    }
+    chosen.extend(sources.iter().cloned());
     change_sources(cli, state, chosen, "sources added")
 }
 
@@ -431,7 +424,7 @@ fn change_sources(cli: &Cli, state: &Path, sources: Vec<String>, message: &str) 
             }
             return Ok(());
         }
-        resume_from(state, &record)?;
+        pause::resume(state, &record)?;
     }
 
     if sources.is_empty() {
@@ -616,9 +609,11 @@ fn status_warnings(state: &Path, hosts: &hosts::Hosts) -> Result<Vec<String>> {
     if hosts.contents().contains("# Block List") {
         warnings.push("legacy-block-list".to_string());
     }
-    let paused = pause::load(state)?
-        .filter(|record| !record.is_expired(pause::now()))
-        .is_some();
+    let record = pause::load(state)?;
+    let now = pause::now();
+    let paused = record
+        .as_ref()
+        .is_some_and(|record| !record.is_expired(now));
     if !paused {
         if let (Some(region), Some(update)) = (hosts.region()?, state::load(state)?) {
             if state::hash_region(region) != update.region_hash {
@@ -626,10 +621,8 @@ fn status_warnings(state: &Path, hosts: &hosts::Hosts) -> Result<Vec<String>> {
             }
         }
     }
-    if let Some(record) = pause::load(state)? {
-        if record.is_expired(pause::now()) {
-            warnings.push("pause-expired".to_string());
-        }
+    if record.as_ref().is_some_and(|record| record.is_expired(now)) {
+        warnings.push("pause-expired".to_string());
     }
     for source in config::load(state)?.sources {
         if catalog::get(&source).is_some() && !sources::cache_path(state, &source).exists() {
@@ -727,9 +720,10 @@ fn doctor(cli: &Cli, state: &Path) -> Result<()> {
         }
         println!("cache: {source} present");
         if entry.format == catalog::Format::Abp {
-            if let Some((kept, cosmetic, other)) = cached_abp_counts(&path) {
+            if let Some(counts) = sources::cached_counts(state, &source) {
                 println!(
-                    "  abp: kept {kept}, dropped {cosmetic} cosmetic and {other} path or option rules"
+                    "  abp: kept {}, dropped {} cosmetic and {} path or option rules",
+                    counts.kept, counts.cosmetic, counts.other
                 );
             }
         }
@@ -762,32 +756,6 @@ fn doctor(cli: &Cli, state: &Path) -> Result<()> {
         println!("doctor: ok");
         Ok(())
     }
-}
-
-fn cached_abp_counts(path: &Path) -> Option<(usize, usize, usize)> {
-    let files = if path.is_dir() {
-        fs::read_dir(path)
-            .ok()?
-            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-            .filter(|path| path.extension().map(|ext| ext != "etag").unwrap_or(true))
-            .collect::<Vec<_>>()
-    } else {
-        vec![path.to_path_buf()]
-    };
-
-    let mut kept = 0;
-    let mut cosmetic = 0;
-    let mut other = 0;
-    let mut any = false;
-    for file in files {
-        let text = fs::read_to_string(file).ok()?;
-        let parsed = catalog::parse(&text, catalog::Format::Abp);
-        kept += parsed.kept;
-        cosmetic += parsed.cosmetic;
-        other += parsed.other;
-        any = true;
-    }
-    any.then_some((kept, cosmetic, other))
 }
 
 fn config_command(state: &Path) -> Result<()> {
@@ -833,24 +801,8 @@ fn off(cli: &Cli, state: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let snapshot = hosts.region()?.unwrap_or_default().to_string();
-    let record = pause::Pause {
-        paused: parsed
-            .sections
-            .iter()
-            .map(|section| section.name.clone())
-            .collect(),
-        hosts_path: cli.hosts.clone(),
-        started: pause::now(),
-        until: None,
-    };
-
-    hosts::require_root(&cli.hosts)?;
-    pause::save(state, &record, &snapshot)?;
-    if let Err(err) = hosts.commit(state, &region::render(&[])) {
-        pause::clear(state);
-        return Err(err);
-    }
+    let record = pause::Pause::plan(&cli.hosts, parsed, &[], None)?;
+    pause::begin(state, &hosts, &record)?;
     if !cli.quiet {
         println!("Block List paused (off). Run `blk resume` to restore it.");
     }
@@ -875,38 +827,7 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
         });
     };
 
-    let known: Vec<String> = parsed
-        .sections
-        .iter()
-        .map(|section| section.name.clone())
-        .collect();
-    let targets = if sources.is_empty() {
-        known.clone()
-    } else {
-        sources
-    };
-    for target in &targets {
-        if !known.contains(target) {
-            return Err(Error::UnknownSource {
-                source: target.clone(),
-                known: known.clone(),
-            });
-        }
-    }
-
-    let kept: Vec<region::Section> = parsed
-        .sections
-        .iter()
-        .filter(|section| !targets.contains(&section.name))
-        .cloned()
-        .collect();
-    let snapshot = hosts.region()?.unwrap_or_default().to_string();
-    let record = pause::Pause {
-        paused: targets,
-        hosts_path: cli.hosts.clone(),
-        started: pause::now(),
-        until,
-    };
+    let record = pause::Pause::plan(&cli.hosts, parsed, &sources, until)?;
 
     if cli.dry_run {
         if !cli.quiet {
@@ -919,12 +840,7 @@ fn pause_command(cli: &Cli, state: &Path, args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    hosts::require_root(&cli.hosts)?;
-    pause::save(state, &record, &snapshot)?;
-    if let Err(err) = hosts.commit(state, &region::render(&kept)) {
-        pause::clear(state);
-        return Err(err);
-    }
+    pause::begin(state, &hosts, &record)?;
 
     if !cli.quiet {
         println!("paused {} {}", record.paused.join(", "), record.describe());
@@ -947,7 +863,7 @@ fn resume(cli: &Cli, state: &Path) -> Result<()> {
         }
         return Ok(());
     }
-    resume_from(state, &record)?;
+    pause::resume(state, &record)?;
     println!("Block List resumed");
     Ok(())
 }
@@ -989,38 +905,20 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
         println!("pause was already resumed elsewhere");
         return Ok(());
     }
-    resume_from(state, record)?;
+    pause::resume(state, record)?;
     println!("Block List resumed");
-    Ok(())
-}
-
-/// Restore the exact region saved at pause time.
-fn resume_from(state: &Path, record: &pause::Pause) -> Result<()> {
-    let hosts = &record.hosts_path;
-    let Some(snapshot) = pause::load_snapshot(state) else {
-        return Err(Error::MissingSnapshot {
-            hosts: hosts.clone(),
-        });
-    };
-    hosts::Hosts::read(hosts)?.commit(state, &snapshot)?;
-    pause::clear(state);
     Ok(())
 }
 
 /// A later command takes over an expired pause. Without root, report it instead.
 fn end_expired_pause(state: &Path) -> Result<()> {
-    let Some(record) = pause::load(state)? else {
-        return Ok(());
-    };
-    if !record.is_expired(pause::now()) {
-        return Ok(());
+    match pause::expire(state)? {
+        pause::Expiry::None => {}
+        pause::Expiry::Resumed => println!("pause expired; region restored"),
+        pause::Expiry::NeedsRoot => {
+            eprintln!("warning: pause expired; run sudo blk resume");
+        }
     }
-    if !hosts::can_write() {
-        eprintln!("warning: pause expired; run sudo blk resume");
-        return Ok(());
-    }
-    resume_from(state, &record)?;
-    println!("pause expired; region restored");
     Ok(())
 }
 

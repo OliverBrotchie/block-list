@@ -242,6 +242,38 @@ fn cache_root(dir: &Path) -> PathBuf {
     dir.join("cache")
 }
 
+/// ABP counters across the cached files for a catalog source, sidecars excluded.
+pub fn cached_counts(dir: &Path, id: &str) -> Option<Counts> {
+    let root = cache_path(dir, id);
+    let files = if root.is_dir() {
+        fs::read_dir(&root)
+            .ok()?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                !matches!(
+                    path.extension().and_then(|ext| ext.to_str()),
+                    Some("etag" | "src")
+                )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        vec![root]
+    };
+
+    let mut counts = Counts::default();
+    let mut any = false;
+    for file in files {
+        let text = fs::read_to_string(file).ok()?;
+        let parsed = catalog::parse(&text, catalog::Format::Abp);
+        counts.kept += parsed.kept;
+        counts.exceptions += parsed.exceptions;
+        counts.cosmetic += parsed.cosmetic;
+        counts.other += parsed.other;
+        any = true;
+    }
+    any.then_some(counts)
+}
+
 /// Where a source's cache entry lives. Catalog ids replace `/` with `-`.
 pub fn cache_path(dir: &Path, source: &str) -> PathBuf {
     let slug = if catalog::get(source).is_some() {
@@ -286,18 +318,12 @@ fn unique_name(base: String, source: &str, used: &mut HashSet<String>) -> String
     if used.insert(base.clone()) {
         return base;
     }
-    let name = format!("{base}-{:08x}", fnv1a(source.as_bytes()) as u32);
+    let name = format!(
+        "{base}-{:08x}",
+        crate::state::fnv1a(source.as_bytes()) as u32
+    );
     used.insert(name.clone());
     name
-}
-
-fn fnv1a(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for byte in bytes {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x100_0000_01b3);
-    }
-    hash
 }
 
 #[cfg(test)]
@@ -333,6 +359,21 @@ mod tests {
         assert_eq!(first, "list.hosts");
         assert!(second.starts_with("list.hosts-"));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn cached_counts_ignore_sidecars() {
+        let dir = temp_dir("counts");
+        let bundle = dir.join("cache/brave-default");
+        fs::create_dir_all(&bundle).unwrap();
+        fs::write(bundle.join("00-a.txt"), "||ads.test^\n||tracker.test^\n").unwrap();
+        fs::write(bundle.join("00-a.txt.src"), "https://example.test/a.txt").unwrap();
+        fs::write(bundle.join("00-a.txt.etag"), "\"abc\"").unwrap();
+
+        let counts = cached_counts(&dir, "brave/default").unwrap();
+        assert_eq!(counts.kept, 2);
+        assert_eq!(counts.other, 0);
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

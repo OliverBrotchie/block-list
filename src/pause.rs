@@ -1,4 +1,6 @@
 use crate::error::{Error, Result};
+use crate::hosts::{self, Hosts};
+use crate::region::{self, Section};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,6 +32,94 @@ impl Pause {
             None => "indefinitely".to_string(),
         }
     }
+
+    /// Plan a pause over the sections of `parsed`. No targets means every section.
+    pub fn plan(
+        hosts_path: &Path,
+        parsed: &region::Parsed,
+        targets: &[String],
+        until: Option<u64>,
+    ) -> Result<Pause> {
+        let known: Vec<String> = parsed
+            .sections
+            .iter()
+            .map(|section| section.name.clone())
+            .collect();
+        let paused = if targets.is_empty() {
+            known.clone()
+        } else {
+            targets.to_vec()
+        };
+        for target in &paused {
+            if !known.contains(target) {
+                return Err(Error::UnknownSource {
+                    source: target.clone(),
+                    known,
+                });
+            }
+        }
+        Ok(Pause {
+            paused,
+            hosts_path: hosts_path.to_path_buf(),
+            started: now(),
+            until,
+        })
+    }
+}
+
+/// Save the record and snapshot, then empty the paused sections.
+pub fn begin(state: &Path, hosts: &Hosts, record: &Pause) -> Result<()> {
+    let parsed = hosts.parsed()?.ok_or_else(|| Error::NoBlockRegion {
+        hosts: record.hosts_path.clone(),
+    })?;
+    let snapshot = hosts.region()?.unwrap_or_default();
+    let kept: Vec<Section> = parsed
+        .sections
+        .iter()
+        .filter(|section| !record.paused.contains(&section.name))
+        .cloned()
+        .collect();
+    hosts::require_root(&record.hosts_path)?;
+    save(state, record, snapshot)?;
+    if let Err(err) = hosts.commit(state, &region::render(&kept)) {
+        clear(state);
+        return Err(err);
+    }
+    Ok(())
+}
+
+/// Restore the exact region saved at pause time.
+pub fn resume(state: &Path, record: &Pause) -> Result<()> {
+    let Some(snapshot) = load_snapshot(state) else {
+        return Err(Error::MissingSnapshot {
+            hosts: record.hosts_path.clone(),
+        });
+    };
+    hosts::Hosts::read(&record.hosts_path)?.commit(state, &snapshot)?;
+    clear(state);
+    Ok(())
+}
+
+/// What a command found when it looked for an expired pause.
+pub enum Expiry {
+    None,
+    Resumed,
+    NeedsRoot,
+}
+
+/// Resume an expired pause. Without root, report it instead.
+pub fn expire(state: &Path) -> Result<Expiry> {
+    let Some(record) = load(state)? else {
+        return Ok(Expiry::None);
+    };
+    if !record.is_expired(now()) {
+        return Ok(Expiry::None);
+    }
+    if !hosts::can_write() {
+        return Ok(Expiry::NeedsRoot);
+    }
+    resume(state, &record)?;
+    Ok(Expiry::Resumed)
 }
 
 pub fn now() -> u64 {
@@ -119,6 +209,34 @@ pub fn clear(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_selects_all_or_named_sections() {
+        let parsed = region::parse(&region::render(&[
+            region::Section {
+                name: "a".into(),
+                entries: Vec::new(),
+            },
+            region::Section {
+                name: "b".into(),
+                entries: Vec::new(),
+            },
+        ]))
+        .unwrap()
+        .unwrap();
+        let host = Path::new("/etc/hosts");
+
+        let all = Pause::plan(host, &parsed, &[], Some(60)).unwrap();
+        assert_eq!(all.paused, vec!["a", "b"]);
+        assert!(all.until.is_some());
+
+        let one = Pause::plan(host, &parsed, &["b".to_string()], None).unwrap();
+        assert_eq!(one.paused, vec!["b"]);
+        assert_eq!(one.until, None);
+
+        let missing = Pause::plan(host, &parsed, &["nope".to_string()], None);
+        assert!(matches!(missing, Err(Error::UnknownSource { .. })));
+    }
 
     #[test]
     fn parses_durations() {

@@ -33,14 +33,19 @@ pub fn save(dir: &Path, state: &State) -> Result<()> {
     fs::write(&path, text).map_err(|err| Error::io("write", path.display().to_string(), err))
 }
 
-/// FNV-1a 64 of the region bytes, for detecting edits made outside the tool.
-pub fn hash_region(region: &str) -> String {
+/// FNV-1a 64, shared by region drift detection and cache names.
+pub(crate) fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for byte in region.as_bytes() {
+    for byte in bytes {
         hash ^= *byte as u64;
         hash = hash.wrapping_mul(0x100_0000_01b3);
     }
-    format!("{hash:016x}")
+    hash
+}
+
+/// FNV-1a 64 of the region bytes, for detecting edits made outside the tool.
+pub fn hash_region(region: &str) -> String {
+    format!("{:016x}", fnv1a(region.as_bytes()))
 }
 
 #[cfg(test)]
