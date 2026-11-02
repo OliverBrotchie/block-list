@@ -1,12 +1,17 @@
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct State {
     pub last_update: u64,
+    #[serde(default)]
+    pub hosts_path: PathBuf,
     pub region_hash: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub counts: BTreeMap<String, usize>,
 }
 
 pub fn path(dir: &Path) -> PathBuf {
@@ -31,7 +36,8 @@ pub fn save(dir: &Path, state: &State) -> Result<()> {
     let path = path(dir);
     let text = toml::to_string(state)
         .map_err(|err| Error::toml_encode(path.display().to_string(), err))?;
-    fs::write(&path, text).map_err(|err| Error::io("write", path.display().to_string(), err))
+    crate::region::write_atomic(&path, &text)
+        .map_err(|err| Error::io("write", path.display().to_string(), err))
 }
 
 /// FNV-1a 64, shared by region drift detection and cache names.
@@ -52,6 +58,14 @@ pub fn hash_region(region: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_state_file_without_the_new_fields_loads() {
+        let state: State = toml::from_str("last_update = 1\nregion_hash = \"abc\"\n").unwrap();
+        assert_eq!(state.last_update, 1);
+        assert!(state.hosts_path.as_os_str().is_empty());
+        assert!(state.counts.is_empty());
+    }
 
     #[test]
     fn hash_is_stable_and_distinguishes_content() {

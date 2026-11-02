@@ -186,6 +186,7 @@ pub fn entries_from_hosts(text: &str) -> (Vec<Entry>, Vec<String>) {
 }
 
 pub(crate) fn entries_of(line: &str) -> Option<Vec<Entry>> {
+    let line = line.split('#').next().unwrap_or_default().trim();
     let mut parts = line.split_whitespace();
     let ip: IpAddr = parts.next()?.parse().ok()?;
     let mut entries = Vec::new();
@@ -355,9 +356,10 @@ mod tests {
 
     #[test]
     fn entries_skip_invalid_lines_and_dedupe() {
-        let text = "0.0.0.0 a.test b.test\n0.0.0.0 a.test\nnot an entry\n# comment\n0.0.0.0\n";
+        let text = "0.0.0.0 a.test b.test\n0.0.0.0 a.test\nnot an entry\n# comment\n0.0.0.0\n0.0.0.0 c.test # trailing note\n";
         let (entries, warnings) = entries_from_hosts(text);
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().any(|entry| entry.host == "c.test"));
         assert_eq!(warnings.len(), 2);
     }
 }

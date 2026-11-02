@@ -109,16 +109,6 @@ fn unknown(name: &str) -> Error {
     }
 }
 
-fn dedupe(sources: Vec<String>) -> Vec<String> {
-    let mut out = Vec::new();
-    for source in sources {
-        if !out.contains(&source) {
-            out.push(source);
-        }
-    }
-    out
-}
-
 #[derive(Debug, PartialEq)]
 pub struct PauseTarget {
     pub label: String,
@@ -129,11 +119,18 @@ pub struct PauseTarget {
 pub fn pause_targets(config: &Config, sections: &[String]) -> Vec<PauseTarget> {
     let mut targets = Vec::new();
     let mut covered: Vec<String> = Vec::new();
+    let names = crate::sources::section_names(&config.sources);
+    let lookup: std::collections::HashMap<&str, &str> = config
+        .sources
+        .iter()
+        .map(String::as_str)
+        .zip(names.iter().map(String::as_str))
+        .collect();
     for view in views(config).iter().filter(|view| view.enabled) {
         let present: Vec<String> = view
             .sources
             .iter()
-            .map(|source| crate::sources::section_name(source))
+            .filter_map(|source| lookup.get(source.as_str()).map(|name| name.to_string()))
             .filter(|name| sections.contains(name))
             .collect();
         if present.is_empty() {
@@ -219,7 +216,7 @@ pub fn edit(config: &mut Config, name: &str, sources: Vec<String>) -> Result<()>
     let Some(old) = config.lists.iter().find(|list| list.name == name).cloned() else {
         return Err(unknown(name));
     };
-    let sources = dedupe(sources);
+    let sources = crate::config::dedupe(sources);
     if sources.is_empty() {
         return Err(Error::ListEmpty);
     }
@@ -261,7 +258,7 @@ pub fn create(config: &mut Config, name: &str, sources: Vec<String>) -> Result<(
             name: name.to_string(),
         });
     }
-    let sources = dedupe(sources);
+    let sources = crate::config::dedupe(sources);
     if sources.is_empty() {
         return Err(Error::ListEmpty);
     }
@@ -436,6 +433,24 @@ mod tests {
 
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].label, "Source · oisd/small");
+    }
+
+    #[test]
+    fn pause_targets_keep_colliding_sources_distinct() {
+        let sources = owned(&["/a/list.hosts", "/b/list.hosts"]);
+        let names = crate::sources::section_names(&sources);
+        let config = Config {
+            sources: sources.clone(),
+            lists: vec![List {
+                name: "Both".into(),
+                sources,
+            }],
+        };
+        let targets = pause_targets(&config, &names);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].sources.len(), 2);
+        assert_ne!(targets[0].sources[0], targets[0].sources[1]);
     }
 
     #[test]

@@ -128,6 +128,8 @@ enum ListsAction {
 }
 
 fn main() {
+    // Exit quietly when the reader closes the pipe.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     let cli = Cli::parse();
     if let Err(err) = run(&cli) {
         eprintln!("error: {err}");
@@ -228,7 +230,6 @@ fn clear_screen() {
     let _ = Term::stderr().clear_screen();
 }
 
-/// Like `attempt`, for actions that report whether they changed anything.
 /// Show a report or result, then wait so the screen is not cleared over it.
 fn show_output(outcome: Result<()>) -> Result<()> {
     match outcome {
@@ -666,8 +667,11 @@ fn pick_sources(title: &str, preselected: &[String]) -> Result<Option<Vec<String
         .allow_empty(true)
         .interact_text()?;
     let extra = extra.trim();
-    if !extra.is_empty() && !chosen.iter().any(|source| source == extra) {
-        chosen.push(extra.to_string());
+    if !extra.is_empty() {
+        validate_source(extra)?;
+        if !chosen.iter().any(|source| source == extra) {
+            chosen.push(extra.to_string());
+        }
     }
     Ok(Some(chosen))
 }
@@ -759,7 +763,7 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
         Vec::new()
     };
     sources.extend(args.iter().chain(from.iter()).cloned());
-    let sources = dedupe(sources);
+    let sources = config::dedupe(sources);
     let persist = if !args.is_empty() || !from.is_empty() {
         Some(config::Config {
             sources: sources.clone(),
@@ -770,6 +774,18 @@ fn update(cli: &Cli, state: &Path, args: &[String], from: &[String]) -> Result<(
     };
     apply(cli, state, &sources, persist.as_ref(), false)?;
     Ok(())
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// The pause record, when it belongs to this hosts file.
+fn pause_on(state: &Path, hosts: &Path) -> Result<Option<pause::Pause>> {
+    Ok(pause::load(state)?.filter(|record| same_path(&record.hosts_path, hosts)))
 }
 
 /// Fetch or read every source, then replace the region in one write.
@@ -783,6 +799,7 @@ fn apply(
     if sources.is_empty() {
         return Err(Error::NoSourcesConfigured);
     }
+    let pause_before = pause_on(state, &cli.hosts)?.map(|record| record.started);
 
     let hosts = hosts::Hosts::read(&cli.hosts)?;
     let mode = if cli.offline {
@@ -828,6 +845,48 @@ fn apply(
             for section in &sections {
                 println!("{}: {} entries", section.name, section.entries.len());
             }
+            let before = hosts.contents();
+            let after = region::replace(before, hosts.parsed()?, &rendered);
+            println!(
+                "before: {} lines, {} bytes",
+                before.lines().count(),
+                before.len()
+            );
+            println!(
+                "after: {} lines, {} bytes",
+                after.lines().count(),
+                after.len()
+            );
+            let before_names: Vec<String> = hosts
+                .parsed()?
+                .map(|parsed| {
+                    parsed
+                        .sections
+                        .iter()
+                        .map(|section| section.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let after_names: Vec<String> = sections
+                .iter()
+                .map(|section| section.name.clone())
+                .collect();
+            let added: Vec<&String> = after_names
+                .iter()
+                .filter(|name| !before_names.contains(*name))
+                .collect();
+            let removed: Vec<&String> = before_names
+                .iter()
+                .filter(|name| !after_names.contains(*name))
+                .collect();
+            if !added.is_empty() {
+                let names: Vec<&str> = added.iter().map(|name| name.as_str()).collect();
+                println!("sources added: {}", names.join(", "));
+            }
+            if !removed.is_empty() {
+                let names: Vec<&str> = removed.iter().map(|name| name.as_str()).collect();
+                println!("sources removed: {}", names.join(", "));
+            }
             println!(
                 "would write {total} entries from {} {noun} to {}",
                 sources.len(),
@@ -853,19 +912,32 @@ fn apply(
 
     hosts::require_root(&cli.hosts)?;
     let _lock = lock::Lock::acquire(state)?;
+    if persist.is_none() && config::load(state)?.sources.as_slice() != sources {
+        return Err(Error::ConfigChanged);
+    }
+    if pause_on(state, &cli.hosts)?.map(|record| record.started) != pause_before {
+        return Err(Error::PauseChanged);
+    }
     hosts.commit(state, &rendered)?;
 
     state::save(
         state,
         &state::State {
             last_update: pause::now(),
+            hosts_path: cli.hosts.clone(),
             region_hash: state::hash_region(&rendered),
+            counts: sections
+                .iter()
+                .map(|section| (section.name.clone(), section.entries.len()))
+                .collect(),
         },
     )?;
     if let Some(persist) = persist {
         config::save(state, persist)?;
     }
-    pause::clear(state);
+    if pause_on(state, &cli.hosts)?.is_some() {
+        pause::clear(state);
+    }
 
     if !cli.quiet {
         println!(
@@ -922,8 +994,11 @@ fn sources_command(cli: &Cli, state: &Path) -> Result<bool> {
         .allow_empty(true)
         .interact_text()?;
     let extra = extra.trim();
-    if !extra.is_empty() && !chosen.iter().any(|source| source == extra) {
-        chosen.push(extra.to_string());
+    if !extra.is_empty() {
+        validate_source(extra)?;
+        if !chosen.iter().any(|source| source == extra) {
+            chosen.push(extra.to_string());
+        }
     }
 
     change_sources(cli, state, chosen, config.lists, "sources selected", false)?;
@@ -999,7 +1074,7 @@ fn change_sources(
     message: &str,
     cache_first: bool,
 ) -> Result<()> {
-    let sources = dedupe(sources);
+    let sources = config::dedupe(sources);
     let next = config::Config {
         sources: sources.clone(),
         lists,
@@ -1021,7 +1096,9 @@ fn change_sources(
     }
 
     if let Some(record) = pause::load(state)? {
-        if !record.is_expired(pause::now()) {
+        if record.is_expired(pause::now()) {
+            pause::resume(state, &record)?;
+        } else if same_path(&record.hosts_path, &cli.hosts) {
             config::save(state, &next)?;
             if !cli.quiet {
                 println!(
@@ -1030,7 +1107,6 @@ fn change_sources(
             }
             return Ok(());
         }
-        pause::resume(state, &record)?;
     }
 
     if sources.is_empty() {
@@ -1063,16 +1139,6 @@ fn validate_source(source: &str) -> Result<()> {
         source,
         catalog::ids().iter().map(|id| id.to_string()).collect(),
     ))
-}
-
-fn dedupe(sources: Vec<String>) -> Vec<String> {
-    let mut out = Vec::new();
-    for source in sources {
-        if !out.contains(&source) {
-            out.push(source);
-        }
-    }
-    out
 }
 
 fn clear_region(cli: &Cli, state: &Path) -> Result<()> {
@@ -1514,7 +1580,9 @@ fn print_pause(record: &pause::Pause, verb: &str) {
 
 fn resume(cli: &Cli, state: &Path) -> Result<()> {
     let Some(record) = pause::load(state)? else {
-        println!("not paused");
+        if !cli.quiet {
+            println!("not paused");
+        }
         return Ok(());
     };
     if cli.dry_run {
@@ -1528,7 +1596,9 @@ fn resume(cli: &Cli, state: &Path) -> Result<()> {
         return Ok(());
     }
     pause::resume(state, &record)?;
-    println!("Resumed.");
+    if !cli.quiet {
+        println!("Resumed.");
+    }
     Ok(())
 }
 
@@ -1583,7 +1653,7 @@ fn hold(state: &Path, record: &pause::Pause) -> Result<()> {
 fn end_expired_pause(state: &Path) -> Result<()> {
     match pause::expire(state)? {
         pause::Expiry::None => {}
-        pause::Expiry::Resumed => println!("Pause expired; region restored."),
+        pause::Expiry::Resumed => eprintln!("Pause expired; region restored."),
         pause::Expiry::NeedsRoot => {
             eprintln!("warning: pause expired; run sudo blk resume");
         }

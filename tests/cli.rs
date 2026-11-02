@@ -75,6 +75,13 @@ fn applies_two_sources_as_two_sections() {
     assert!(text.starts_with("127.0.0.1 localhost"));
     assert!(text.contains("0.0.0.0 ads.example"));
     assert!(text.contains("0.0.0.0 tracker.example"));
+
+    let state: toml::Value =
+        toml::from_str(&fs::read_to_string(dir.path().join("state").join("state.toml")).unwrap())
+            .unwrap();
+    assert_eq!(state["hosts_path"].as_str(), hosts.to_str());
+    assert_eq!(state["counts"]["a.hosts"].as_integer(), Some(1));
+    assert_eq!(state["counts"]["b.hosts"].as_integer(), Some(1));
 }
 
 #[test]
@@ -333,7 +340,7 @@ fn an_expired_pause_is_restored_by_the_next_command() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(String::from_utf8_lossy(&out.stdout).contains("Pause expired"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Pause expired"));
     assert_eq!(fs::read_to_string(&hosts).unwrap(), before);
 }
 
@@ -375,6 +382,62 @@ fn update_clears_a_pause_record() {
     );
     assert!(!dir.path().join("state").join("pause.toml").exists());
     assert!(fs::read_to_string(&hosts).unwrap().contains("ads.example"));
+}
+
+#[test]
+fn updating_one_hosts_file_keeps_another_files_pause() {
+    let (dir, hosts_a) = setup("cross-hosts", "127.0.0.1 localhost\n");
+    let hosts_b = dir.path().join("hosts-b");
+    fs::write(&hosts_b, "127.0.0.1 localhost\n").unwrap();
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    let b = list(&dir, "b.hosts", "0.0.0.0 tracker.example\n");
+
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts_a.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap()
+        ]
+    )
+    .status
+    .success());
+    assert!(run(
+        &dir,
+        &["--hosts", hosts_a.to_str().unwrap(), "pause", "a.hosts"]
+    )
+    .status
+    .success());
+    let paused_a = fs::read_to_string(&hosts_a).unwrap();
+    assert!(!paused_a.contains("ads.example"));
+
+    let out = run(
+        &dir,
+        &[
+            "--hosts",
+            hosts_b.to_str().unwrap(),
+            "update",
+            b.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.path().join("state").join("pause.toml").exists());
+    assert_eq!(fs::read_to_string(&hosts_a).unwrap(), paused_a);
+    assert!(fs::read_to_string(&hosts_b)
+        .unwrap()
+        .contains("tracker.example"));
+
+    assert!(run(&dir, &["--hosts", hosts_a.to_str().unwrap(), "resume"])
+        .status
+        .success());
+    assert!(fs::read_to_string(&hosts_a)
+        .unwrap()
+        .contains("ads.example"));
 }
 
 #[test]
@@ -424,6 +487,16 @@ fn dry_run_writes_nothing() {
         ],
     );
     assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("before: 1 lines, 20 bytes"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("after: "), "stdout: {stdout}");
+    assert!(
+        stdout.contains("sources added: a.hosts"),
+        "stdout: {stdout}"
+    );
     assert_eq!(fs::read_to_string(&hosts).unwrap(), before);
     assert!(!dir.path().join("state").exists());
 }
@@ -510,6 +583,11 @@ fn offline_url_source_reads_the_cache() {
     let text = fs::read_to_string(&hosts).unwrap();
     assert!(text.contains("# list: x.hosts"));
     assert!(text.contains("0.0.0.0 cached.example"));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("cached copy has no etag"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
@@ -1173,6 +1251,38 @@ fn resume_dry_run_does_not_write() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("would restore"));
     assert_eq!(fs::read_to_string(&hosts).unwrap(), paused);
     assert!(dir.path().join("state").join("pause.toml").exists());
+}
+
+#[test]
+fn resume_quiet_prints_nothing() {
+    let (dir, hosts) = setup("resume-quiet", "127.0.0.1 localhost\n");
+    let a = list(&dir, "a.hosts", "0.0.0.0 ads.example\n");
+    assert!(run(
+        &dir,
+        &[
+            "--hosts",
+            hosts.to_str().unwrap(),
+            "update",
+            a.to_str().unwrap()
+        ]
+    )
+    .status
+    .success());
+    assert!(run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "pause", "a.hosts"]
+    )
+    .status
+    .success());
+
+    let out = run(
+        &dir,
+        &["--hosts", hosts.to_str().unwrap(), "--quiet", "resume"],
+    );
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty(), "stdout: {out:?}");
+    assert!(!dir.path().join("state").join("pause.toml").exists());
+    assert!(fs::read_to_string(&hosts).unwrap().contains("ads.example"));
 }
 
 #[test]

@@ -22,6 +22,17 @@ pub fn path(dir: &Path) -> PathBuf {
     dir.join("config.toml")
 }
 
+/// Keep first occurrences, preserving order.
+pub fn dedupe(sources: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for source in sources {
+        if !out.contains(&source) {
+            out.push(source);
+        }
+    }
+    out
+}
+
 pub fn load(dir: &Path) -> Result<Config> {
     let path = path(dir);
     if !path.exists() {

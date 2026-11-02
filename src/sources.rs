@@ -42,21 +42,29 @@ pub fn load_all(
     mode: Mode,
     write_cache: bool,
 ) -> Result<Vec<Loaded>> {
-    let mut used = HashSet::new();
     let mut loaded = Vec::new();
-    for source in sources {
-        loaded.push(load(dir, source, mode, write_cache, &mut used)?);
+    for (source, name) in sources.iter().zip(section_names(sources)) {
+        loaded.push(load(dir, source, name, mode, write_cache)?);
     }
     Ok(loaded)
 }
 
-fn load(
-    dir: &Path,
-    source: &str,
-    mode: Mode,
-    write_cache: bool,
-    used: &mut HashSet<String>,
-) -> Result<Loaded> {
+/// The section name each source gets, in order. Colliding basenames gain a hash suffix.
+pub fn section_names(sources: &[String]) -> Vec<String> {
+    let mut used = HashSet::new();
+    sources
+        .iter()
+        .map(|source| {
+            if catalog::get(source).is_some() {
+                source.clone()
+            } else {
+                unique_name(sanitize(source), source, &mut used)
+            }
+        })
+        .collect()
+}
+
+fn load(dir: &Path, source: &str, name: String, mode: Mode, write_cache: bool) -> Result<Loaded> {
     if let Some(entry) = catalog::get(source) {
         return load_catalog(dir, source, entry, mode, write_cache);
     }
@@ -68,16 +76,21 @@ fn load(
         ));
     }
 
-    let name = unique_name(sanitize(source), source, used);
+    let mut warnings = Vec::new();
     let (text, fetched) = if is_url(source) {
         let path = cache_root(dir).join(&name);
-        fetch_or_cache(source, &path, mode, write_cache)?
+        let (body, fetched) = fetch_or_cache(source, &path, mode, write_cache)?;
+        if mode == Mode::Offline && !sidecar(&path, "etag").exists() {
+            warnings.push(format!("{source}: cached copy has no etag"));
+        }
+        (body, fetched)
     } else {
         let text =
             fs::read_to_string(source).map_err(|err| Error::io("read", source.to_string(), err))?;
         (text, false)
     };
-    let (entries, warnings) = region::entries_from_hosts(&text);
+    let (entries, mut parse_warnings) = region::entries_from_hosts(&text);
+    warnings.append(&mut parse_warnings);
     if entries.is_empty() {
         return Err(Error::EmptySource {
             source: source.to_string(),
@@ -126,6 +139,9 @@ fn load_catalog(
         };
         let (text, downloaded) = fetch_or_cache(url, &path, mode, write_cache)?;
         fetched |= downloaded;
+        if mode == Mode::Offline && !sidecar(&path, "etag").exists() {
+            warnings.push(format!("{url}: cached copy has no etag"));
+        }
 
         match entry.format {
             Format::Hosts => {
@@ -304,15 +320,6 @@ pub fn cached_counts(dir: &Path, id: &str) -> Option<Counts> {
     any.then_some(counts)
 }
 
-/// The section name a source gets in the hosts region.
-pub fn section_name(source: &str) -> String {
-    if catalog::get(source).is_some() {
-        source.to_string()
-    } else {
-        sanitize(source)
-    }
-}
-
 /// Where a source's cache entry lives. Catalog ids replace `/` with `-`.
 pub fn cache_path(dir: &Path, source: &str) -> PathBuf {
     let slug = if catalog::get(source).is_some() {
@@ -402,13 +409,26 @@ mod tests {
 
     #[test]
     fn section_names_match_catalog_ids_and_paths() {
-        assert_eq!(section_name("stevenblack/hosts"), "stevenblack/hosts");
-        assert_eq!(section_name("blk/social"), "blk/social");
+        let name = |source: &str| section_names(&[source.to_string()])[0].clone();
+        assert_eq!(name("stevenblack/hosts"), "stevenblack/hosts");
+        assert_eq!(name("blk/social"), "blk/social");
         assert_eq!(
-            section_name("https://example.test/lists/ads.hosts?x=1"),
+            name("https://example.test/lists/ads.hosts?x=1"),
             "ads.hosts"
         );
-        assert_eq!(section_name("/tmp/my list.hosts"), "my-list.hosts");
+        assert_eq!(name("/tmp/my list.hosts"), "my-list.hosts");
+    }
+
+    #[test]
+    fn section_names_suffix_collisions_in_order() {
+        let names = section_names(&[
+            "/a/list.hosts".to_string(),
+            "/b/list.hosts".to_string(),
+            "blk/social".to_string(),
+        ]);
+        assert_eq!(names[0], "list.hosts");
+        assert!(names[1].starts_with("list.hosts-"));
+        assert_eq!(names[2], "blk/social");
     }
 
     #[test]
