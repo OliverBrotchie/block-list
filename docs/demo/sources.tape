@@ -16,8 +16,8 @@ Set BorderRadius 10
 Set WindowBar "Colorful"
 Set WindowBarSize 36
 Set Framerate 24
-Set PlaybackSpeed 1.1
-Set TypingSpeed 35ms
+Set PlaybackSpeed 0.9
+Set TypingSpeed 50ms
 Set Theme "Catppuccin Mocha"
 
 Hide
@@ -29,15 +29,16 @@ Show
 Sleep 500ms
 
 Type "blk"
-Enter
 Sleep 500ms
+Enter
 Hide
 Sleep 1200ms
 Down@150ms 1
+Sleep 400ms
 Enter
 Sleep 900ms
 Show
-Sleep 800ms
+Sleep 1000ms
 Hide
 Sleep 300ms
 Enter
@@ -51,11 +52,11 @@ Sleep 400ms
 Up
 Sleep 400ms
 Space
-Sleep 800ms
+Sleep 1200ms
 Enter
 Sleep 900ms
 Enter
-Sleep 2500ms
+Sleep 3000ms
 Hide
 Sleep 300ms
 Enter

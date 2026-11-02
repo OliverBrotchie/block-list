@@ -189,7 +189,6 @@ Set `BLK_DIR` to use a different directory. The tests use it.
 - Apps that use their own DNS, or hardcoded IP addresses, can bypass the hosts file.
 - Ad and tracker domains change. Schedule updates.
 - Blocking can break a login, payment, or update flow that reuses a tracker host. Pause for a minute to check.
-- A legacy `# Block List` from version 1 is never read or removed.
 
 ## Scheduled updates
 
@@ -200,39 +199,6 @@ Add this to root's crontab to refresh every night at 22:00:
 ```
 
 Use the absolute path from `command -v blk` if cron cannot find it.
-
-## Upgrading from 1.x
-
-- `cargo uninstall block-list`, then `cargo install block-list --locked`. Cargo does not remove the old `block-list` binary.
-- The binary is now `blk`.
-- The hosts path is no longer a positional argument. Use `--hosts` to override it.
-- Lists come from the catalog. Run `blk sources` or `blk add`.
-- The region format changed. An old `# Block List` tail is left untouched.
-- State lives in `/etc/blk`.
-
-## Removing blk
-
-```shell
-sudo blk resume
-sudo blk rm <source> [<source>...]   # repeat until the region is empty
-rm -rf /etc/blk
-```
-
-Removing the last source removes the region and `state.toml` and keeps the rest of the hosts file. To return to the file from before the first `blk` write, restoring `hosts.bak` also discards later hand edits.
-
-## Development
-
-```shell
-cargo test
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
-```
-
-Network tests are marked ignored:
-
-```shell
-cargo test -- --ignored
-```
 
 ## License
 
