@@ -1,5 +1,5 @@
 # Pause one purpose list from the menu, then restore it with Ctrl-C.
-# The hidden setup points a blk shell function at a throwaway hosts file.
+# The hidden setup defines a demo sudo shim and points a blk shell function at a throwaway hosts file.
 # Run from the repo root after `cargo build --release`: vhs docs/demo/pause.tape
 Output "docs/assets/demo-pause.gif"
 
@@ -22,17 +22,17 @@ Set Theme "Catppuccin Mocha"
 
 Hide
 Sleep 1s
-Type "export BLKBIN=$PWD/target/release/blk; blk() { $BLKBIN --yes --hosts /tmp/blk-demo/hosts $@; }; export CLICOLOR_FORCE=1; export TERM=xterm-256color; rm -rf /tmp/blk-demo; mkdir -p /tmp/blk-demo; echo '127.0.0.1 localhost' > /tmp/blk-demo/hosts; export BLK_DIR=/tmp/blk-demo/state; blk update blk/streaming blk/social >/dev/null; export PS1='$ '; clear"
+Type "export BLKBIN=$PWD/target/release/blk; blk() { $BLKBIN --yes --hosts /tmp/blk-demo/hosts $@; }; sudo() { $@; }; export CLICOLOR_FORCE=1; export TERM=xterm-256color; rm -rf /tmp/blk-demo; mkdir -p /tmp/blk-demo; echo '127.0.0.1 localhost' > /tmp/blk-demo/hosts; export BLK_DIR=/tmp/blk-demo/state; blk update blk/streaming blk/social >/dev/null; export PS1='$ '; clear"
 Enter
 Sleep 2s
 Show
 Sleep 500ms
 
-Type "blk"
+Type "sudo blk"
 Sleep 500ms
 Enter
 Hide
-Sleep 1200ms
+Sleep 2500ms
 Enter
 Sleep 900ms
 Show

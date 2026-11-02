@@ -1,5 +1,5 @@
 # Select block lists from the catalog in the TUI, then leave the menu.
-# The hidden setup points a blk shell function at a throwaway hosts file.
+# The hidden setup defines a demo sudo shim and points a blk shell function at a throwaway hosts file.
 # Run from the repo root after `cargo build --release`: vhs docs/demo/sources.tape
 Output "docs/assets/demo-sources.gif"
 
@@ -22,17 +22,17 @@ Set Theme "Catppuccin Mocha"
 
 Hide
 Sleep 1s
-Type "export BLKBIN=$PWD/target/release/blk; blk() { $BLKBIN --yes --hosts /tmp/blk-demo/hosts $@; }; export CLICOLOR_FORCE=1; export TERM=xterm-256color; rm -rf /tmp/blk-demo; mkdir -p /tmp/blk-demo; echo '127.0.0.1 localhost' > /tmp/blk-demo/hosts; export BLK_DIR=/tmp/blk-demo/state; export PS1='$ '; clear"
+Type "export BLKBIN=$PWD/target/release/blk; blk() { $BLKBIN --yes --hosts /tmp/blk-demo/hosts $@; }; sudo() { $@; }; export CLICOLOR_FORCE=1; export TERM=xterm-256color; rm -rf /tmp/blk-demo; mkdir -p /tmp/blk-demo; echo '127.0.0.1 localhost' > /tmp/blk-demo/hosts; export BLK_DIR=/tmp/blk-demo/state; export PS1='$ '; clear"
 Enter
 Sleep 2s
 Show
 Sleep 500ms
 
-Type "blk"
+Type "sudo blk"
 Sleep 500ms
 Enter
 Hide
-Sleep 1200ms
+Sleep 2500ms
 Down@150ms 1
 Sleep 400ms
 Enter

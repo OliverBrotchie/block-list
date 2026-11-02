@@ -26,11 +26,23 @@
 
 ## Install
 
+### Cargo
+
 ```shell
-cargo install block-list --locked
+cargo install block-list
 ```
 
-The package is `block-list`; the binary is `blk`. `--locked` installs the exact dependency versions in `Cargo.lock`, so every install uses the same set.
+The package is `block-list`; the binary is `blk`.
+
+### Homebrew
+
+```shell
+brew tap OliverBrotchie/block-list https://github.com/OliverBrotchie/block-list
+brew trust OliverBrotchie/block-list
+brew install --HEAD OliverBrotchie/block-list/blk
+```
+
+Homebrew builds the main branch. Use Cargo for a tagged release.
 
 ### Requirements
 
@@ -38,7 +50,7 @@ The package is `block-list`; the binary is `blk`. `--locked` installs the exact 
 - Rust stable to build from source.
 - Root only for commands that write the hosts file or `/etc/blk`.
 
-Root is needed only for writes. `blk status`, `blk test`, `blk lists`, `blk catalog`, and `blk doctor` run as your user. Start the menu with `sudo blk` when you want to change something; without root, a write stops with a sudo hint.
+The menu needs root. Run `sudo blk`; without root it exits with a sudo hint. `blk status`, `blk test`, `blk lists`, and `blk catalog` run as your user. The other examples use `sudo`.
 
 ## Usage
 
@@ -48,7 +60,7 @@ sudo blk update       # fetch and write the region
 blk status            # read it without root
 ```
 
-`blk` on its own opens the menu. Start it with `sudo` to apply changes.
+`sudo blk` opens the menu. Without root it exits with a sudo hint.
 
 <p align="center">
   <img src="docs/assets/demo-sources.gif" alt="Choosing sources from the catalog in the menu" width="860">
@@ -58,7 +70,7 @@ blk status            # read it without root
 ```shell
 blk status [--json]           # region, counts, pause, and warnings
 blk test instagram.com        # check one hostname against the hosts file
-blk doctor                    # markers, cache, backup, and drift
+sudo blk doctor               # markers, cache, backup, and drift
 ```
 
 `blk status` exits 0 with warnings; `blk doctor` exits 1 when it finds a problem.
@@ -92,7 +104,7 @@ A list is a named bundle of sources. It is on when every member is configured.
 | Media streaming | `blk/streaming`, `blocklistproject/youtube` |
 | Malware and phishing | `malwarefilter/urlhaus`, `hagezi/pro` |
 
-Run `blk lists` for the full set. `blk lists toggle "Social media"` works without a terminal; create and edit custom lists in the menu.
+Run `blk lists` for the full set. `sudo blk lists toggle "Social media"` works without a terminal; create and edit custom lists in the menu.
 
 - Turning a list off keeps a member that another enabled list still needs.
 - Editing an enabled custom list follows the same rule.
@@ -120,7 +132,7 @@ Only this region is rewritten. Writes use a temp file in the same directory, an 
 
 | command | what it does |
 | --- | --- |
-| `blk` | open the menu on a terminal; print status and usage otherwise, exit 2 |
+| `blk` | open the menu on a terminal with root; print status and usage otherwise, exit 2 |
 | `blk status [--json]` | show the region, source counts, last update, pause, and warnings |
 | `blk update [SOURCE...] [--from URL_OR_PATH]` | fetch the configured sources and rewrite the region |
 | `blk sources` | choose sources from the catalog, interactive |
