@@ -163,6 +163,9 @@ fn run(cli: &Cli) -> Result<()> {
 
 fn bare(cli: &Cli, state: &Path) -> Result<()> {
     if std::io::stdin().is_terminal() {
+        if !hosts::can_write() {
+            return Err(Error::MenuNeedsRoot);
+        }
         return menu(cli, state);
     }
     status(cli, state, false)?;
@@ -963,6 +966,11 @@ fn sources_command(cli: &Cli, state: &Path) -> Result<bool> {
         }
         println!("add sources with `blk add <id-or-url>`; see `blk catalog`");
         return Ok(false);
+    }
+    if !hosts::can_write() {
+        return Err(Error::RootRequired {
+            hosts: cli.hosts.clone(),
+        });
     }
 
     clear_screen();

@@ -28,6 +28,8 @@ pub enum Error {
     EmptyListName,
     /// Another blk process holds the state lock.
     Busy,
+    /// The interactive menu needs root to change the hosts file.
+    MenuNeedsRoot,
     /// The config changed while sources were fetched.
     ConfigChanged,
     /// A pause started while sources were fetched.
@@ -141,6 +143,7 @@ impl fmt::Display for Error {
             Error::ListEmpty => f.write_str("a list needs at least one source"),
             Error::EmptyListName => f.write_str("a list needs a name"),
             Error::Busy => f.write_str("another blk process is running; try again"),
+            Error::MenuNeedsRoot => f.write_str("the menu needs root; run `sudo blk`"),
             Error::ConfigChanged => {
                 f.write_str("the config changed while sources were fetched; run the command again")
             }
