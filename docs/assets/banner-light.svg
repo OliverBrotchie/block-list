@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="blk — one region, every app, easy to pause">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="blk">
   <defs>
     <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0969da"/>
@@ -10,15 +10,12 @@
     <text x="1140" y="272" text-anchor="end" font-size="15" fill="#8c959f" letter-spacing="0.5"># END blk</text>
     <line x1="60" y1="84" x2="1140" y2="84" stroke="#d8dee4" stroke-width="1"/>
     <line x1="60" y1="254" x2="1140" y2="254" stroke="#d8dee4" stroke-width="1"/>
-
-    <g transform="translate(60 116)">
+    <g transform="translate(455 120)">
       <path d="M18 46V30a24 24 0 0 1 48 0v16" fill="none" stroke="#0969da" stroke-width="9" stroke-linecap="round"/>
       <rect x="2" y="46" width="80" height="62" rx="14" fill="url(#mark)"/>
       <circle cx="42" cy="72" r="6" fill="#ffffff"/>
       <rect x="38.5" y="76" width="7" height="16" rx="3.5" fill="#ffffff"/>
+      <text x="112" y="100" font-size="112" font-weight="700" fill="#1f2328" letter-spacing="-7">blk</text>
     </g>
-
-    <text x="174" y="186" font-size="108" font-weight="700" fill="#1f2328" letter-spacing="-7">blk</text>
-    <text x="178" y="228" font-size="22" fill="#59636e">One region. Every app. Easy to pause.</text>
   </g>
 </svg>
