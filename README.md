@@ -37,8 +37,6 @@ The package is `block-list`; the binary is `blk`.
 ### Homebrew
 
 ```shell
-brew tap OliverBrotchie/block-list https://github.com/OliverBrotchie/block-list
-brew trust OliverBrotchie/block-list
 brew install OliverBrotchie/block-list/blk
 ```
 
