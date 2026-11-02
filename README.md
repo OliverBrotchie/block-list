@@ -5,7 +5,7 @@
   <img src="docs/assets/banner-light.svg" alt="blk, a hosts-based block list manager" width="820">
 </picture>
 
-<strong>A minimalist hosts-based tool for managing block lists and ad-blocking.</strong>
+<strong>A minimalist hosts-based tool for blocking websites and ads.</strong>
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)](#requirements)
@@ -30,13 +30,15 @@
 cargo install block-list --locked
 ```
 
-The package is `block-list`; the binary is `blk`. `--locked` uses the versions in `Cargo.lock`.
+The package is `block-list`; the binary is `blk`. `--locked` installs the exact dependency versions in `Cargo.lock`, so the build matches the versions CI tested.
 
 ### Requirements
 
 - macOS or Linux.
 - Rust stable to build from source.
 - Root only for commands that write the hosts file or `/etc/blk`.
+
+Root is needed only for writes. `blk status`, `blk test`, `blk lists`, and `blk catalog` run as your user. Start the menu with `sudo blk` when you want to change something; without root, a write stops with a sudo hint.
 
 ## Usage
 
@@ -46,7 +48,7 @@ sudo blk update       # fetch and write the region
 blk status            # read it without root
 ```
 
-`blk` on its own opens the menu.
+`blk` on its own opens the menu. Start it with `sudo` to apply changes.
 
 <p align="center">
   <img src="docs/assets/demo-sources.gif" alt="Choosing sources from the catalog in the menu" width="860">
@@ -60,6 +62,24 @@ sudo blk doctor               # markers, cache, backup, and drift
 ```
 
 `blk status` exits 0 with warnings; `blk doctor` exits 1 when it finds a problem.
+
+## Pausing
+
+<p align="center">
+  <img src="docs/assets/demo-pause.gif" alt="Pausing a list from the menu and restoring it with Ctrl-C" width="860">
+</p>
+<p align="center"><sub>Pausing a list in the menu. Ctrl-C restores the previous region.</sub></p>
+
+```shell
+sudo blk pause 25                      # every source, 25 minutes
+sudo blk pause stevenblack/social 1h   # one source, one hour
+sudo blk off                           # every source, indefinitely
+sudo blk resume                        # restore now
+```
+
+A bare number means minutes, so `blk pause 30` is the same as `blk pause 30m`. Durations accept `s`, `m`, `h`, and `d`, and combine, as in `1h30m`.
+
+The pause saves the region to `pause.region` and empties the chosen sections. The held process restores it on expiry, `SIGINT`, `SIGTERM`, or `SIGHUP`. Without a terminal it exits and says nothing will restore it automatically. If the process is killed with `SIGKILL`, the next command reports a live pause and restores one whose deadline has passed. There is one pause at a time.
 
 ## Purpose lists
 
@@ -80,24 +100,6 @@ Run `blk lists` for the full set. `blk lists toggle "Social media"` works withou
 - Deleting a list keeps its sources configured.
 
 `blk/social` and `blk/streaming` ship inside the binary. They work offline and change only with a release. The social list contains no WhatsApp domains.
-
-## Pausing
-
-<p align="center">
-  <img src="docs/assets/demo-pause.gif" alt="Pausing a list from the menu and restoring it with Ctrl-C" width="860">
-</p>
-<p align="center"><sub>Pausing a list in the menu. Ctrl-C restores the previous region.</sub></p>
-
-```shell
-sudo blk pause 25                      # every source, 25 minutes
-sudo blk pause stevenblack/social 1h   # one source, one hour
-sudo blk off                           # every source, indefinitely
-sudo blk resume                        # restore now
-```
-
-A bare number means minutes, so `blk pause 30` is the same as `blk pause 30m`. Durations accept `s`, `m`, `h`, and `d`, and combine, as in `1h30m`.
-
-The pause saves the region to `pause.region` and empties the chosen sections. The held process restores it on expiry, `SIGINT`, `SIGTERM`, or `SIGHUP`. Without a terminal it exits and says nothing will restore it automatically. If the process is killed with `SIGKILL`, the next command reports a live pause and restores one whose deadline has passed. There is one pause at a time.
 
 ## What blk writes
 
