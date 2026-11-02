@@ -39,10 +39,9 @@ The package is `block-list`; the binary is `blk`.
 ```shell
 brew tap OliverBrotchie/block-list https://github.com/OliverBrotchie/block-list
 brew trust OliverBrotchie/block-list
-brew install --HEAD OliverBrotchie/block-list/blk
+brew install OliverBrotchie/block-list/blk
 ```
 
-Homebrew builds the main branch. Use Cargo for a tagged release.
 
 ### Requirements
 
