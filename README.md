@@ -30,7 +30,7 @@
 cargo install block-list --locked
 ```
 
-The package is `block-list`; the binary is `blk`. `--locked` installs the exact dependency versions in `Cargo.lock`, so the build matches the versions CI tested.
+The package is `block-list`; the binary is `blk`. `--locked` installs the exact dependency versions in `Cargo.lock`, so the build uses the dependency versions in the lockfile.
 
 ### Requirements
 

@@ -25,4 +25,4 @@ Added:
 - Pause with a duration, foreground countdown, signal restore, and lazy expiry.
 - `status --json`, `test <domain>`, `doctor`, `completions <shell>`, and a menu on a bare invocation.
 - Atomic hosts writes, a one-time `hosts.bak`, and a root check with a sudo hint.
-- Integration tests and CI on macOS and Ubuntu.
+- Integration tests on macOS and Ubuntu.
