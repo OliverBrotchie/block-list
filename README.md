@@ -30,7 +30,7 @@
 cargo install block-list --locked
 ```
 
-The package is `block-list`; the binary is `blk`. `--locked` installs the exact dependency versions in `Cargo.lock`, so the build uses the dependency versions in the lockfile.
+The package is `block-list`; the binary is `blk`. `--locked` installs the exact dependency versions in `Cargo.lock`, so every install uses the same set.
 
 ### Requirements
 
@@ -38,7 +38,7 @@ The package is `block-list`; the binary is `blk`. `--locked` installs the exact 
 - Rust stable to build from source.
 - Root only for commands that write the hosts file or `/etc/blk`.
 
-Root is needed only for writes. `blk status`, `blk test`, `blk lists`, and `blk catalog` run as your user. Start the menu with `sudo blk` when you want to change something; without root, a write stops with a sudo hint.
+Root is needed only for writes. `blk status`, `blk test`, `blk lists`, `blk catalog`, and `blk doctor` run as your user. Start the menu with `sudo blk` when you want to change something; without root, a write stops with a sudo hint.
 
 ## Usage
 
@@ -58,7 +58,7 @@ blk status            # read it without root
 ```shell
 blk status [--json]           # region, counts, pause, and warnings
 blk test instagram.com        # check one hostname against the hosts file
-sudo blk doctor               # markers, cache, backup, and drift
+blk doctor                    # markers, cache, backup, and drift
 ```
 
 `blk status` exits 0 with warnings; `blk doctor` exits 1 when it finds a problem.
