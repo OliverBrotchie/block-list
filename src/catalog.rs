@@ -38,69 +38,136 @@ impl Source {
     }
 }
 
-/// Paid streaming services. YouTube comes from its own source.
+/// Paid streaming services. YouTube's CDN hosts come from its own source.
 const STREAMING: &[&str] = &[
+    // YouTube
+    "youtube.com",
+    "youtu.be",
+    "youtube-nocookie.com",
+    "youtubekids.com",
+    "ytimg.com",
+    "ytstatic.com",
+    "youtube.googleapis.com",
+    "youtubegoogleapis.com",
+    "yt3.ggpht.com",
+    "yt4.ggpht.com",
+    "googlevideo.com",
+    // Netflix
     "netflix.com",
+    "netflix.net",
     "nflxvideo.net",
     "nflximg.net",
     "nflxext.com",
     "nflxso.net",
+    // Prime Video
     "primevideo.com",
     "amazonvideo.com",
     "aiv-cdn.net",
     "aiv-delivery.net",
+    "media-amazon.com",
+    "pv-cdn.net",
+    // Disney+
     "disneyplus.com",
     "disney-plus.net",
     "bamgrid.com",
     "dssott.com",
+    // Hulu
     "hulu.com",
     "huluim.com",
+    "hulu.tv",
+    // Max
     "max.com",
     "hbomax.com",
     "hbomaxcdn.com",
+    "hbomax.eu",
+    // Apple TV+
     "tv.apple.com",
     "play.itunes.apple.com",
+    // Twitch
     "twitch.tv",
+    "twitchcdn.net",
+    "ext-twitch.tv",
     "ttvnw.net",
     "jtvnw.net",
+    "live-video.net",
+    // Crunchyroll
     "crunchyroll.com",
+    "crunchyrollsvc.com",
     "vrv.co",
+    // Peacock
     "peacocktv.com",
+    "peacocktv.net",
+    // Paramount+
     "paramountplus.com",
+    // Pluto TV
     "pluto.tv",
+    // Other services
+    "discoveryplus.com",
+    "tubitv.com",
+    "dailymotion.com",
+    "bilibili.com",
+    "iqiyi.com",
 ];
 
 /// Social networks, with no WhatsApp domains.
 const SOCIAL: &[&str] = &[
+    // Facebook
     "facebook.com",
+    "facebook.net",
     "fb.com",
+    "fb.me",
     "fbcdn.net",
     "fbsbx.com",
     "messenger.com",
+    "m.me",
+    // Instagram
     "instagram.com",
     "cdninstagram.com",
+    "ig.me",
+    // TikTok
     "tiktok.com",
     "tiktokcdn.com",
+    "tiktokcdn-us.com",
     "tiktokv.com",
     "byteoversea.com",
+    // X
     "twitter.com",
     "x.com",
     "t.co",
     "twimg.com",
+    "tweetdeck.com",
+    // Snapchat
     "snapchat.com",
+    "snap.com",
     "snap-cdn.net",
     "sc-cdn.net",
+    // Reddit
     "reddit.com",
     "redd.it",
     "redditstatic.com",
     "redditmedia.com",
+    "redditinc.com",
+    // LinkedIn
     "linkedin.com",
     "licdn.com",
+    "lnkd.in",
+    // Pinterest
     "pinterest.com",
     "pinimg.com",
+    // Tumblr
     "tumblr.com",
+    // Threads
     "threads.net",
+    "threads.com",
+    // Bluesky
     "bsky.app",
+    "bsky.social",
+    // Discord
+    "discord.com",
+    "discord.gg",
+    "discordapp.com",
+    "discordapp.net",
+    "discord.media",
 ];
 
 const BRAVE_DEFAULT: &[&str] = &[

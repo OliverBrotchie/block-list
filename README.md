@@ -108,7 +108,7 @@ Run `blk lists` for the full set. `sudo blk lists toggle "Social media"` works w
 - Preset names are reserved and presets are immutable.
 - Deleting a list keeps its sources configured.
 
-`blk/social` and `blk/streaming` ship inside the binary. They work offline and change only with a release. The social list contains no WhatsApp domains.
+The curated social and streaming lists ship inside the binary. They work offline and change only with a release. Each entry covers the bare host plus its `www.` and `m.` variants, because a hosts file cannot wildcard. The social list contains no WhatsApp domains.
 
 ## What blk writes
 

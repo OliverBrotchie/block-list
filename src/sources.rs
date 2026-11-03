@@ -121,13 +121,17 @@ fn load_catalog(
     let mut empty_domains = 0usize;
     let mut warnings = Vec::new();
 
+    // Hosts files match exact names, so a curated apex domain also needs the
+    // subdomains people actually visit.
     for domain in entry.inline {
-        let entry = Entry {
-            ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            host: domain.to_string(),
-        };
-        if seen.insert((entry.ip, entry.host.clone())) {
-            entries.push(entry);
+        for prefix in ["", "www.", "m."] {
+            let entry = Entry {
+                ip: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                host: format!("{prefix}{domain}"),
+            };
+            if seen.insert((entry.ip, entry.host.clone())) {
+                entries.push(entry);
+            }
         }
     }
 
@@ -444,6 +448,26 @@ mod tests {
             .iter()
             .any(|entry| entry.host.contains("whatsapp")));
         assert!(!dir.join("cache").exists());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn inline_source_covers_www_and_mobile_subdomains() {
+        let dir = temp_dir("subdomains");
+        let loaded = load_all(
+            &dir,
+            &["blk/streaming".to_string(), "blk/social".to_string()],
+            Mode::Offline,
+            false,
+        )
+        .unwrap();
+        let has =
+            |index: usize, host: &str| loaded[index].entries.iter().any(|entry| entry.host == host);
+        assert!(has(0, "www.netflix.com"));
+        assert!(has(0, "www.youtube.com"));
+        assert!(has(0, "m.youtube.com"));
+        assert!(has(1, "www.facebook.com"));
+        assert!(has(1, "m.facebook.com"));
         fs::remove_dir_all(dir).ok();
     }
 
