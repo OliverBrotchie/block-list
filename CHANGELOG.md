@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+Fixed:
+
+- Curated inline domains now also block their `www.` and `m.` hosts. A hosts file matches exact names, so `netflix.com` alone did not block `www.netflix.com`.
+- The streaming list includes YouTube front ends (`youtube.com`, `youtu.be`, `youtube-nocookie.com`, `youtubekids.com`, `ytimg.com`, `ytstatic.com`, and related domains). The YouTube source only covered CDN hosts.
+- The streaming and social lists cover more services and provider domains.
+
 ## 2.0.0
 
 Breaking changes:
